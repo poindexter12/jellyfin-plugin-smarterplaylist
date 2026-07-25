@@ -86,12 +86,14 @@ Which operators are valid depends on the type of the property you are filtering 
 |---|---|---|
 | Text | `Name`, `MediaType`, `Album`, `FolderPath` | `Equal`, `NotEqual`, `Equals`, `Contains`, `StartsWith`, `EndsWith`, `MatchRegex`, `NotMatchRegex` |
 | List of text | `Actors`, `Composers`, `Directors`, `Genres`, `GuestStars`, `Producers`, `Studios`, `Writers` | `Contains`, `MatchRegex`, `NotMatchRegex` |
-| Number | `CommunityRating`, `CriticRating`, `PremiereDate`, `DateCreated`, `DateLastRefreshed`, `DateLastSaved`, `DateModified` | `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual` |
+| Number | `CommunityRating`, `CriticRating` | `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual` |
+| Date | `PremiereDate`, `DateCreated`, `DateLastRefreshed`, `DateLastSaved`, `DateModified` | `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual` |
 | True/false | `IsPlayed` | `Equal`, `NotEqual` |
 
 Notes:
 
 - `Equal` and `NotEqual` come from the [LINQ expression operators](https://docs.microsoft.com/en-us/dotnet/api/system.linq.expressions.expressiontype), so any name from that list is accepted, but only the ones above make sense for a given property type.
+- Date properties accept either a readable date (`"2020-07-01"`, `"2020-07-01T00:00:00Z"`) or a raw Unix timestamp. Readable dates are treated as UTC. Anything that is neither is rejected with an error naming the property.
 - On a list property, `Contains` requires a whole exact element — `"Contains": "Grey"` will not match a director named `CGP Grey`. Use `MatchRegex` for partial matches.
 - On a list property, `MatchRegex` matches if **any** element matches, and `NotMatchRegex` holds only if **no** element matches.
 - Using an operator a property does not support fails the refresh for that playlist and logs the error to the Jellyfin server log.

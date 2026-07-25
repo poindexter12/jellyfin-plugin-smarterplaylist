@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Linq;
 using MediaBrowser.Controller;
@@ -59,8 +60,18 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         /// Definitions are not partitioned per user on disk, so <paramref name="userId"/> does not
         /// affect the returned path.
         /// </remarks>
+        /// <exception cref="ArgumentException">
+        /// <paramref name="playlistId"/> is empty or contains path separators. It becomes a file name,
+        /// and a definition's <c>FileName</c> is user-supplied, so a traversal sequence would otherwise
+        /// let a definition be written outside <see cref="BasePath"/>.
+        /// </exception>
         public string GetSmarterPlaylistPath(string userId, string playlistId)
         {
+            if (string.IsNullOrWhiteSpace(playlistId) || Path.GetFileName(playlistId) != playlistId)
+            {
+                throw new ArgumentException($"'{playlistId}' is not a valid playlist file name", nameof(playlistId));
+            }
+
             return Path.Combine(BasePath, $"{playlistId}.json");
         }
     }

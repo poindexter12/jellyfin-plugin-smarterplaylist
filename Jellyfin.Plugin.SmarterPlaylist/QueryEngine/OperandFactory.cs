@@ -28,7 +28,10 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
         /// <returns>An operand describing <paramref name="baseItem"/>.</returns>
         public static Operand GetMediaType(ILibraryManager libraryManager, IUserDataManager userDataManager, BaseItem baseItem, User user)
         {
-            var operand = new Operand(baseItem.Name);
+            // MediaBrowser.Controller is compiled without nullable annotations, so these string
+            // members are null-oblivious: the compiler accepts them but Album is null on anything
+            // that is not audio, and a rule such as Album/Contains would throw per item.
+            var operand = new Operand(baseItem.Name ?? string.Empty);
 
             var people = libraryManager.GetPeople(baseItem);
             if (people.Count != 0)
@@ -56,7 +59,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
             operand.CommunityRating = baseItem.CommunityRating.GetValueOrDefault();
             operand.CriticRating = baseItem.CriticRating.GetValueOrDefault();
             operand.MediaType = baseItem.MediaType.ToString();
-            operand.Album = baseItem.Album;
+            operand.Album = baseItem.Album ?? string.Empty;
 
             if (baseItem.PremiereDate.HasValue)
             {
@@ -67,7 +70,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
             operand.DateLastRefreshed = new DateTimeOffset(baseItem.DateLastRefreshed).ToUnixTimeSeconds();
             operand.DateLastSaved = new DateTimeOffset(baseItem.DateLastSaved).ToUnixTimeSeconds();
             operand.DateModified = new DateTimeOffset(baseItem.DateModified).ToUnixTimeSeconds();
-            operand.FolderPath = baseItem.ContainingFolderPath;
+            operand.FolderPath = baseItem.ContainingFolderPath ?? string.Empty;
 
             return operand;
         }

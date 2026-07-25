@@ -12,7 +12,12 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             {
                 CommunityRating = 7.6f,
                 IsPlayed = false,
-                MediaType = "Video"
+                MediaType = "Video",
+                PremiereDate = 636249600,
+                DateCreated = 636249600,
+                DateLastRefreshed = 636249600,
+                DateLastSaved = 636249600,
+                DateModified = 636249600
             };
 
             operand.Directors.Add("John McTiernan");
@@ -163,6 +168,52 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             Engine.FixRules(set);
 
             Assert.Equal("1593561600", set.Expressions[0].TargetValue);
+        }
+
+        // FixRules originally rewrote only PremiereDate, so a human-readable date on any of the
+        // other four date members reached Convert.ChangeType as a string and threw FormatException
+        // at compile time -- which aborts the whole refresh run, not just that playlist.
+        [Theory]
+        [InlineData("PremiereDate")]
+        [InlineData("DateCreated")]
+        [InlineData("DateLastRefreshed")]
+        [InlineData("DateLastSaved")]
+        [InlineData("DateModified")]
+        public void EveryDateMemberAcceptsAHumanReadableDate(string member)
+        {
+            var set = new ExpressionSet();
+            set.Expressions.Add(new Expression(member, "LessThan", "2020-07-01T00:00:00Z"));
+
+            Engine.FixRules(set);
+
+            Assert.Equal("1593561600", set.Expressions[0].TargetValue);
+            Assert.True(Engine.CompileRule<Operand>(set.Expressions[0])(SampleOperand()));
+        }
+
+        // Definitions written before the fix already store raw Unix seconds; those must survive
+        // a second normalization pass untouched rather than being re-parsed as a date.
+        [Theory]
+        [InlineData("PremiereDate")]
+        [InlineData("DateCreated")]
+        public void AlreadyNumericDateValuesArePassedThrough(string member)
+        {
+            var set = new ExpressionSet();
+            set.Expressions.Add(new Expression(member, "LessThan", "1593561600"));
+
+            Engine.FixRules(set);
+
+            Assert.Equal("1593561600", set.Expressions[0].TargetValue);
+        }
+
+        [Fact]
+        public void UnparseableDateValueThrowsWithTheMemberNamed()
+        {
+            var set = new ExpressionSet();
+            set.Expressions.Add(new Expression("DateCreated", "LessThan", "not a date"));
+
+            var ex = Assert.Throws<ArgumentException>(() => Engine.FixRules(set));
+
+            Assert.Contains("DateCreated", ex.Message, StringComparison.Ordinal);
         }
 
         [Fact]

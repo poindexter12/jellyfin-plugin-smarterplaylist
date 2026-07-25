@@ -28,6 +28,18 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
         private const string NotMatchRegexOperator = "NotMatchRegex";
 
         /// <summary>
+        /// Members held as Unix seconds, whose rule values may be written as readable dates.
+        /// </summary>
+        private static readonly string[] _dateMembers =
+        [
+            nameof(Operand.PremiereDate),
+            nameof(Operand.DateCreated),
+            nameof(Operand.DateLastRefreshed),
+            nameof(Operand.DateLastSaved),
+            nameof(Operand.DateModified)
+        ];
+
+        /// <summary>
         /// Compiles a single rule into a predicate over <typeparamref name="T"/>.
         /// </summary>
         /// <typeparam name="T">Type the rule is evaluated against, normally <see cref="Operand"/>.</typeparam>
@@ -64,21 +76,33 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
         /// Rewrites date-valued rules in a set so their target values are Unix seconds.
         /// </summary>
         /// <remarks>
-        /// <see cref="Operand.PremiereDate"/> is stored as Unix seconds, but playlist JSON is written with
-        /// human-readable dates. This converts the latter to the former before the rule is compiled.
+        /// Date members are stored as Unix seconds, but playlist JSON is written with readable dates.
+        /// This converts the latter to the former before the rule is compiled. Values that are already
+        /// numeric are left alone, so definitions written against earlier versions keep working.
         /// </remarks>
         /// <param name="rules">Rule set to normalize in place.</param>
         /// <returns>The same <paramref name="rules"/> instance, for chaining.</returns>
+        /// <exception cref="ArgumentException">A date member's value is neither a date nor a Unix timestamp.</exception>
         public static ExpressionSet FixRules(ExpressionSet rules)
         {
             ArgumentNullException.ThrowIfNull(rules);
 
             foreach (var rule in rules.Expressions)
             {
-                if (rule.MemberName == nameof(Operand.PremiereDate))
+                if (Array.IndexOf(_dateMembers, rule.MemberName) < 0)
                 {
-                    var parsed = DateTime.Parse(rule.TargetValue, CultureInfo.InvariantCulture);
+                    continue;
+                }
+
+                if (DateTime.TryParse(rule.TargetValue, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed))
+                {
                     rule.TargetValue = ConvertToUnixTimestamp(parsed).ToString(CultureInfo.InvariantCulture);
+                }
+                else if (!double.TryParse(rule.TargetValue, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
+                {
+                    throw new ArgumentException(
+                        $"Value '{rule.TargetValue}' for date member '{rule.MemberName}' is neither a date nor a Unix timestamp",
+                        nameof(rules));
                 }
             }
 
