@@ -17,6 +17,6 @@ jobs:
   call:
     uses: jellyfin/jellyfin-meta-plugins/.github/workflows/changelog.yaml@master
     with:
-      repository-name: jellyfin/jellyfin-plugin-template
+      repository-name: poindexter12/jellyfin-plugin-smarterplaylist
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
