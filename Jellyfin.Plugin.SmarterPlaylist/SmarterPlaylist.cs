@@ -35,7 +35,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist
             Name = dto.Name;
             FileName = dto.FileName;
             User = dto.User;
-            ExpressionSets = Engine.FixRuleSets(dto.ExpressionSets);
+            ExpressionSets = Engine.NormalizeRuleSets(dto.ExpressionSets);
             MaxItems = dto.MaxItems > 0 ? dto.MaxItems : DefaultMaxItems;
 
             Order = dto.Order.Name switch

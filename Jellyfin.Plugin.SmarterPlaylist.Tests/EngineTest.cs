@@ -1,4 +1,5 @@
 using System;
+using System.Text.Json;
 using Jellyfin.Plugin.SmarterPlaylist.QueryEngine;
 using Xunit;
 
@@ -159,18 +160,45 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             Assert.Throws<MissingMethodException>(() => Engine.CompileRule<Operand>(expression));
         }
 
+        // Normalization must not touch the caller's rule set. The rules belong to the deserialized
+        // DTO, which is written back to disk on first creation -- so mutating in place rewrote the
+        // user's own "2020-07-01" to "1593561600" in their file. Combined with the old code path,
+        // which then failed to re-parse that timestamp as a date, a PremiereDate rule worked exactly
+        // once and afterwards permanently aborted every playlist's refresh.
         [Fact]
-        public void PremiereDateRulesAreRewrittenToUnixSeconds()
+        public void NormalizationDoesNotMutateTheCallersRuleSet()
         {
             var set = new ExpressionSet();
             set.Expressions.Add(new Expression("PremiereDate", "LessThan", "2020-07-01T00:00:00Z"));
 
-            Engine.FixRules(set);
+            var normalized = Engine.NormalizeRules(set);
 
-            Assert.Equal("1593561600", set.Expressions[0].TargetValue);
+            Assert.Equal("2020-07-01T00:00:00Z", set.Expressions[0].TargetValue);
+            Assert.Equal("1593561600", normalized.Expressions[0].TargetValue);
         }
 
-        // FixRules originally rewrote only PremiereDate, so a human-readable date on any of the
+        // The full corruption cycle: normalize, persist what the DTO now holds, reload, normalize
+        // again. The user's original value must survive the round trip unchanged.
+        [Fact]
+        public void RepeatedNormalizationIsStableAcrossASaveReloadCycle()
+        {
+            var dto = new SmarterPlaylistDto();
+            var set = new ExpressionSet();
+            set.Expressions.Add(new Expression("PremiereDate", "LessThan", "2020-07-01T00:00:00Z"));
+            dto.ExpressionSets.Add(set);
+
+            var firstRun = new SmarterPlaylist(dto);
+            var persisted = JsonSerializer.Serialize(dto);
+            var reloaded = JsonSerializer.Deserialize<SmarterPlaylistDto>(persisted);
+            var secondRun = new SmarterPlaylist(reloaded!);
+
+            Assert.Equal("2020-07-01T00:00:00Z", reloaded!.ExpressionSets[0].Expressions[0].TargetValue);
+            Assert.Equal(
+                firstRun.ExpressionSets[0].Expressions[0].TargetValue,
+                secondRun.ExpressionSets[0].Expressions[0].TargetValue);
+        }
+
+        // Normalization originally rewrote only PremiereDate, so a human-readable date on any of the
         // other four date members reached Convert.ChangeType as a string and threw FormatException
         // at compile time -- which aborts the whole refresh run, not just that playlist.
         [Theory]
@@ -184,10 +212,10 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             var set = new ExpressionSet();
             set.Expressions.Add(new Expression(member, "LessThan", "2020-07-01T00:00:00Z"));
 
-            Engine.FixRules(set);
+            var normalized = Engine.NormalizeRules(set);
 
-            Assert.Equal("1593561600", set.Expressions[0].TargetValue);
-            Assert.True(Engine.CompileRule<Operand>(set.Expressions[0])(SampleOperand()));
+            Assert.Equal("1593561600", normalized.Expressions[0].TargetValue);
+            Assert.True(Engine.CompileRule<Operand>(normalized.Expressions[0])(SampleOperand()));
         }
 
         // Definitions written before the fix already store raw Unix seconds; those must survive
@@ -200,9 +228,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             var set = new ExpressionSet();
             set.Expressions.Add(new Expression(member, "LessThan", "1593561600"));
 
-            Engine.FixRules(set);
-
-            Assert.Equal("1593561600", set.Expressions[0].TargetValue);
+            Assert.Equal("1593561600", Engine.NormalizeRules(set).Expressions[0].TargetValue);
         }
 
         [Fact]
@@ -211,7 +237,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             var set = new ExpressionSet();
             set.Expressions.Add(new Expression("DateCreated", "LessThan", "not a date"));
 
-            var ex = Assert.Throws<ArgumentException>(() => Engine.FixRules(set));
+            var ex = Assert.Throws<ArgumentException>(() => Engine.NormalizeRules(set));
 
             Assert.Contains("DateCreated", ex.Message, StringComparison.Ordinal);
         }
@@ -222,9 +248,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             var set = new ExpressionSet();
             set.Expressions.Add(new Expression("Name", "Contains", "2020-07-01"));
 
-            Engine.FixRules(set);
-
-            Assert.Equal("2020-07-01", set.Expressions[0].TargetValue);
+            Assert.Equal("2020-07-01", Engine.NormalizeRules(set).Expressions[0].TargetValue);
         }
 
         [Fact]

@@ -28,7 +28,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
         /// </summary>
         /// <remarks>
         /// Always written as a string in JSON and converted to the property's type when the rule is compiled.
-        /// Date values are rewritten to Unix seconds by <see cref="Engine.FixRules"/> before compilation.
+        /// Date values are rewritten to Unix seconds by <see cref="Engine.NormalizeRules"/> before compilation.
         /// </remarks>
         public string TargetValue { get; set; } = targetValue;
     }

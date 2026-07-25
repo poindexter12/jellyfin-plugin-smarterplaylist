@@ -59,6 +59,27 @@ Every item below was verified against the code in this repository. Items marked 
 - Trigger: Create a definition without an `Id`; the plugin stamps the generated id and serializes with default options.
 - Fix approach: Pass `new JsonSerializerOptions { WriteIndented = true }`. Listed as "Pretty Print JSON files" in the README's future work.
 
+**Date rules corrupted their own definition file — FIXED 2026-07-25:**
+- Symptoms: A `PremiereDate` rule written as a readable date worked on the first refresh, then permanently aborted **every** playlist's refresh on all subsequent runs.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Engine.cs`, `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylist.cs`, `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs`
+- Cause: three separate behaviors compounding. `Engine.FixRuleSets` normalized the rule set **in place**, mutating the deserialized DTO's own `Expression` objects. `RefreshPlaylistAsync` constructs the `SmarterPlaylist` (triggering that mutation) and then calls `SaveAsync(dto)` when first creating the playlist, persisting the mutated values — so the user's `"2020-07-01"` became `"1593561600"` in their own file. On the next run `DateTime.Parse("1593561600")` threw `FormatException`, and because an exception in `RefreshPlaylistAsync` propagates out of `ExecuteAsync`, that aborted the entire task.
+- Resolution: `NormalizeRuleSets`/`NormalizeRules` replace `FixRuleSets`/`FixRules` and return copies, leaving the caller's rule set untouched. Numeric values also pass through, so any file already corrupted by the old behavior keeps working.
+- Verification: `EngineTest.NormalizationDoesNotMutateTheCallersRuleSet` and `RepeatedNormalizationIsStableAcrossASaveReloadCycle`, the latter simulating the full normalize/persist/reload/normalize cycle.
+- Note: found by designing the config page against the real data shape, not by reading the code — two prior review passes over this constructor missed it.
+
+**Operand took nulls from null-oblivious Jellyfin members — FIXED 2026-07-25:**
+- Symptoms: Any rule on `Album` or `FolderPath` threw `NullReferenceException` per item for anything that is not audio.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/OperandFactory.cs`
+- Cause: `MediaBrowser.Controller` is compiled **without** `<Nullable>enable</Nullable>`, so `BaseItem.Album`, `ContainingFolderPath` and `Name` are null-oblivious. Assigning them to non-nullable `Operand` strings produced no compiler diagnostic, but `Album` is null for every Movie and Episode — both supported item kinds.
+- Resolution: null-coalesced to `string.Empty` at the projection boundary.
+- Watch for: the analyzer stack **cannot** catch this class of bug. Any value taken from a Jellyfin API must be treated as nullable regardless of what the compiler says.
+
+**FileName allowed path traversal — FIXED 2026-07-25:**
+- Risk: `SmarterPlaylistDto.FileName` is user-supplied and became the file name unchecked in `GetSmarterPlaylistPath`, so a definition could be written outside `BasePath`.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistFileSystem.cs`
+- Resolution: empty names and anything containing a path separator are now rejected. Covered by `SmarterPlaylistFileSystemTest`.
+- Escalation risk was limited today (writing a definition already requires access to the data directory), but this becomes externally reachable the moment the planned config page exposes `FileName` over HTTP.
+
 ## Security Considerations
 
 **User-supplied regular expressions:**
@@ -177,11 +198,12 @@ Every item below was verified against the code in this repository. Items marked 
 - Risk: High. The dash-stripping id comparison and the direct `LinkedChildren` rewrite are both fragile and both silent on failure.
 - Priority: High. Blocked on making the store injectable (see Tech Debt) and on mocking the Jellyfin manager interfaces.
 
-**Store and filesystem layers:**
-- What's not tested: JSON load/save round-trip against a real temp directory, and directory creation on first use.
-- Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistStore.cs`, `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistFileSystem.cs`
+**Store layer:**
+- What's not tested: JSON load/save round-trip against a real temp directory. `SmarterPlaylistFileSystem` is now covered by `SmarterPlaylistFileSystemTest`, but `SmarterPlaylistStore` is not.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistStore.cs`
 - Risk: Medium. DTO-level serialization is covered by `SmarterPlaylistDtoTest.cs`, but nothing exercises the file I/O path.
 - Priority: Medium. Straightforward to add — no Jellyfin services are involved.
+- **Unblocked 2026-07-25:** the test project now references `Jellyfin.Controller`/`Jellyfin.Model` *without* `ExcludeAssets=runtime`. The plugin excludes them because the server supplies them at runtime, but that also made every Jellyfin type fail to load under the test host — which is the real reason the Jellyfin-facing code had no coverage, rather than a deliberate choice. Tests touching Jellyfin types are now possible.
 
 **`OperandFactory` projection:**
 - What's not tested: The mapping from `BaseItem` to `Operand`, including the `PersonKind` filtering that was silently broken before the 10.11 migration (it compared the enum against strings, so every person collection came back empty).

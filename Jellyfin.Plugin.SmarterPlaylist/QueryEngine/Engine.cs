@@ -56,57 +56,82 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
         }
 
         /// <summary>
-        /// Normalizes every rule in each supplied set so the rules are ready to compile.
+        /// Produces a compile-ready copy of every supplied rule set.
         /// </summary>
-        /// <param name="rulesets">Rule sets to normalize in place.</param>
-        /// <returns>The same <paramref name="rulesets"/> instance, for chaining.</returns>
-        public static Collection<ExpressionSet> FixRuleSets(Collection<ExpressionSet> rulesets)
+        /// <remarks>
+        /// This deliberately does not mutate <paramref name="rulesets"/>. The caller's rule sets belong
+        /// to the deserialized <see cref="SmarterPlaylistDto"/>, which is written back to disk when a
+        /// playlist is first created; normalizing in place would rewrite the user's readable dates as
+        /// opaque Unix timestamps in their own file.
+        /// </remarks>
+        /// <param name="rulesets">Rule sets to normalize.</param>
+        /// <returns>A new collection of normalized rule sets, leaving the input untouched.</returns>
+        public static Collection<ExpressionSet> NormalizeRuleSets(Collection<ExpressionSet> rulesets)
         {
             ArgumentNullException.ThrowIfNull(rulesets);
 
+            var normalized = new Collection<ExpressionSet>();
+
             foreach (var rules in rulesets)
             {
-                FixRules(rules);
+                normalized.Add(NormalizeRules(rules));
             }
 
-            return rulesets;
+            return normalized;
         }
 
         /// <summary>
-        /// Rewrites date-valued rules in a set so their target values are Unix seconds.
+        /// Produces a compile-ready copy of a rule set, with date values expressed as Unix seconds.
         /// </summary>
         /// <remarks>
         /// Date members are stored as Unix seconds, but playlist JSON is written with readable dates.
         /// This converts the latter to the former before the rule is compiled. Values that are already
-        /// numeric are left alone, so definitions written against earlier versions keep working.
+        /// numeric are passed through, so definitions written against earlier versions keep working.
         /// </remarks>
-        /// <param name="rules">Rule set to normalize in place.</param>
-        /// <returns>The same <paramref name="rules"/> instance, for chaining.</returns>
+        /// <param name="rules">Rule set to normalize.</param>
+        /// <returns>A new rule set, leaving <paramref name="rules"/> untouched.</returns>
         /// <exception cref="ArgumentException">A date member's value is neither a date nor a Unix timestamp.</exception>
-        public static ExpressionSet FixRules(ExpressionSet rules)
+        public static ExpressionSet NormalizeRules(ExpressionSet rules)
         {
             ArgumentNullException.ThrowIfNull(rules);
 
+            var normalized = new ExpressionSet();
+
             foreach (var rule in rules.Expressions)
             {
-                if (Array.IndexOf(_dateMembers, rule.MemberName) < 0)
-                {
-                    continue;
-                }
-
-                if (DateTime.TryParse(rule.TargetValue, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed))
-                {
-                    rule.TargetValue = ConvertToUnixTimestamp(parsed).ToString(CultureInfo.InvariantCulture);
-                }
-                else if (!double.TryParse(rule.TargetValue, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
-                {
-                    throw new ArgumentException(
-                        $"Value '{rule.TargetValue}' for date member '{rule.MemberName}' is neither a date nor a Unix timestamp",
-                        nameof(rules));
-                }
+                normalized.Expressions.Add(
+                    new Expression(rule.MemberName, rule.Operator, NormalizeTargetValue(rule)));
             }
 
-            return rules;
+            return normalized;
+        }
+
+        /// <summary>
+        /// Returns a rule's target value in the form the compiled expression expects.
+        /// </summary>
+        /// <param name="rule">Rule whose value is being normalized.</param>
+        /// <returns>The normalized value, or the original for members needing no conversion.</returns>
+        /// <exception cref="ArgumentException">A date member's value is neither a date nor a Unix timestamp.</exception>
+        private static string NormalizeTargetValue(Expression rule)
+        {
+            if (Array.IndexOf(_dateMembers, rule.MemberName) < 0)
+            {
+                return rule.TargetValue;
+            }
+
+            if (DateTime.TryParse(rule.TargetValue, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed))
+            {
+                return ConvertToUnixTimestamp(parsed).ToString(CultureInfo.InvariantCulture);
+            }
+
+            if (double.TryParse(rule.TargetValue, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
+            {
+                return rule.TargetValue;
+            }
+
+            throw new ArgumentException(
+                $"Value '{rule.TargetValue}' for date member '{rule.MemberName}' is neither a date nor a Unix timestamp",
+                nameof(rule));
         }
 
         /// <summary>
