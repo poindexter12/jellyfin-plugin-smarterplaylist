@@ -24,11 +24,11 @@ Every item below was verified against the code in this repository. Items marked 
 - Impact: The task cannot be unit tested against a fake store, which is why there is currently no test coverage of the refresh flow at all. CA1859 also forces the field to be typed as the concrete class.
 - Fix approach: Register `ISmarterPlaylistStore`/`ISmarterPlaylistFileSystem` via an `IPluginServiceRegistrator` and inject them.
 
-**Template leftovers in repo configuration:**
-- Issue: `scan-codeql.yaml` passes `repository-name: jellyfin/jellyfin-plugin-template` instead of this repository.
-- Files: `.github/workflows/scan-codeql.yaml`
-- Impact: CodeQL results are attributed to the wrong repository name.
-- Fix approach: Change to `poindexter12/jellyfin-plugin-smarterplaylist`. (The sibling leftovers in `build.yaml` — placeholder overview, description, and changelog — were already corrected.)
+**Template leftovers in repo configuration — FIXED 2026-07-25:**
+- Issue: `scan-codeql.yaml` **and** `changelog.yaml` both passed `repository-name: jellyfin/jellyfin-plugin-template` instead of this repository, so CodeQL results and generated changelogs were attributed to the wrong name. `README.md` linked to `blob/master` while the default branch is `main`, so the `Operand` link 404'd.
+- Files: `.github/workflows/scan-codeql.yaml`, `.github/workflows/changelog.yaml`, `README.md`
+- Resolution: Both corrected. The sibling leftovers in `build.yaml` — placeholder overview, description, and changelog — were corrected during the 10.11 migration.
+- Watch for: Other `@master` references in `.github/workflows/` are **correct** — they pin the upstream `jellyfin/jellyfin-meta-plugins` reusable workflows, whose default branch really is `master`. Do not "fix" those.
 
 **No plugin configuration page:**
 - Issue: `Plugin` previously implemented `IHasWebPages` but returned a single `PluginPageInfo` with its `EmbeddedResourcePath` commented out, registering an empty page. The interface has been removed rather than left as a broken stub.
@@ -38,21 +38,20 @@ Every item below was verified against the code in this repository. Items marked 
 
 ## Known Bugs
 
-**`MaxItems` is a silent no-op — CONFIRMED:**
-- Symptoms: A definition setting `MaxItems` has no effect; playlists are never truncated.
+**`MaxItems` was a silent no-op — FIXED 2026-07-25:**
+- Symptoms: A definition setting `MaxItems` had no effect; playlists were never truncated.
 - Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylist.cs`, `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistDto.cs`
-- Trigger: Set `"MaxItems": 10` on any definition with more than 10 matches. All matches are added.
-- Detail: The value is parsed, defaulted to `DefaultMaxItems` (1000), and exposed as a property, but `FilterPlaylistItems` never applies a `Take`. The field is also absent from the README's documented field list, so it is both non-functional and undocumented.
-- Workaround: None. Narrow the rules instead.
+- Cause: The value was parsed, defaulted to `DefaultMaxItems` (1000), and exposed as a property, but `FilterPlaylistItems` never applied a `Take`. The field was also absent from the README, so it was both non-functional and undocumented.
+- Resolution: `FilterPlaylistItems` now applies `.Take(MaxItems)` after ordering, so the cap keeps the first N in the chosen sort order. `MaxItems` is now documented in `README.md`.
+- Residual risk: The cap itself is **not** covered by a test, because `FilterPlaylistItems` requires `ILibraryManager`/`IUserDataManager` doubles. Only the DTO-to-model mapping is asserted. See Test Coverage Gaps.
 
-**`MatchRegex`/`NotMatchRegex` are broken on collection properties — CONFIRMED BY TEST:**
-- Symptoms: `MatchRegex` against `Directors`, `Genres`, `Actors`, `Composers`, `GuestStars`, `Producers`, or `Studios` never matches. `NotMatchRegex` against those same properties matches every item.
+**`MatchRegex`/`NotMatchRegex` were broken on collection properties — FIXED 2026-07-25:**
+- Symptoms: `MatchRegex` against `Directors`, `Genres`, `Actors`, `Composers`, `GuestStars`, `Producers`, or `Studios` never matched. `NotMatchRegex` against those same properties matched every item.
 - Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Engine.cs` (`BuildRegexExpr`)
-- Trigger: A rule of `{"MemberName": "Directors", "Operator": "MatchRegex", "TargetValue": "McTiernan"}` against an item directed by John McTiernan returns `false`.
-- Cause: `BuildRegexExpr` resolves `ToString()` on the property type. For a collection that binds to `Object.ToString()`, so the pattern is tested against the CLR type name (`System.Collections.ObjectModel.Collection\`1[System.String]`) rather than the collection's contents.
-- Severity: `NotMatchRegex` is the dangerous half — it silently returns `true` for everything, so a rule intended to exclude items excludes nothing.
-- Fix approach: Detect `IEnumerable<string>` properties and emit an `Any(s => regex.IsMatch(s))` call instead of `regex.IsMatch(prop.ToString())`. Pre-dates the 10.11 migration; behaved identically when these were `List<string>`.
-- Workaround: Use `Contains` for collections; reserve regex for the plain string properties (`Name`, `MediaType`, `Album`, `FolderPath`).
+- Cause: `BuildRegexExpr` resolved `ToString()` on the property type. For a collection that binds to `Object.ToString()`, so the pattern was tested against the CLR type name rather than the collection's contents.
+- Severity: `NotMatchRegex` was the dangerous half — it silently returned `true` for everything, so a rule intended to exclude items excluded nothing. Pre-dated the 10.11 migration; behaved identically when these were `List<string>`.
+- Resolution: `BuildRegexExpr` now detects `IEnumerable<string>` properties and emits `Enumerable.Any(collection, element => regex.IsMatch(element))`, so a rule matches when any element matches. Non-collection members keep the previous `ToString()` behavior.
+- Verification: Covered by `EngineTest.RegexOperatorsMatchCollectionMembersElementWise`, `RegexAgainstCollectionDoesNotMatchTheClrTypeName`, and `RegexAgainstEmptyCollectionDoesNotMatch`. These fail against the old implementation.
 
 **Hand-authored JSON is reflowed to minified JSON:**
 - Symptoms: The first refresh after creating a definition rewrites the user's formatted file as a single minified line.
@@ -114,13 +113,12 @@ Every item below was verified against the code in this repository. Items marked 
 - Safe modification: Keep the attribute whenever a collection property is get-only. `SmarterPlaylistDtoTest.cs` loads the exact JSON documented in the README and will fail if this regresses.
 - Test coverage: Good — deserialization, round-trip, and missing-collection defaults are all covered.
 
-**Playlist entry removal reimplements a working platform API — VERIFIED, REMOVABLE:**
-- Files: `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs` (`RemoveFromPlaylist`)
-- Why fragile: The private `RemoveFromPlaylist` reaches past the public API, rewriting `playlist.LinkedChildren` directly and calling `UpdateToRepositoryAsync` itself. A source comment justified this: *"Real PlaylistManagers RemoveFromPlaylist needs an entry ID which seems to not work."*
-- Root cause (verified against Jellyfin v10.11.11 `Emby.Server.Implementations/Playlists/PlaylistManager.cs`): that diagnosis was wrong. `IPlaylistManager.RemoveItemFromPlaylistAsync(string playlistId, IEnumerable<string> entryIds)` matches on `i.Item1.ItemId?.ToString("N", CultureInfo.InvariantCulture)` — the **undashed** id format. The plugin was passing dashed (`"D"`) ids, so nothing ever matched, and the author concluded the API was broken rather than that the format was wrong.
-- Detail: Jellyfin's implementation is otherwise line-for-line what the plugin hand-rolled — same `GetManageableItems`, same `LinkedChildren` rewrite, same `QueueRefresh` with `ForceSave`.
-- Fix approach: Delete `RemoveFromPlaylist` entirely and call `_playlistManager.RemoveItemFromPlaylistAsync(playlist.Id.ToString(), ids)` passing ids formatted with `ToString("N")`. This also drops the `IFileSystem` and `IProviderManager` constructor dependencies, since Jellyfin queues the metadata refresh internally.
-- Test coverage: **None.** The whole refresh path is untested, which is why this went unnoticed.
+**Playlist entry removal reimplemented a working platform API — FIXED 2026-07-25:**
+- Files: `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs`
+- Why it was fragile: A private `RemoveFromPlaylist` reached past the public API, rewriting `playlist.LinkedChildren` directly and calling `UpdateToRepositoryAsync` itself. A source comment justified this: *"Real PlaylistManagers RemoveFromPlaylist needs an entry ID which seems to not work."*
+- Root cause (verified against Jellyfin v10.11.11 `Emby.Server.Implementations/Playlists/PlaylistManager.cs`): that diagnosis was wrong. `IPlaylistManager.RemoveItemFromPlaylistAsync(string playlistId, IEnumerable<string> entryIds)` matches on `i.Item1.ItemId?.ToString("N", CultureInfo.InvariantCulture)` — the **undashed** id format. The plugin was passing dashed (`"D"`) ids, so nothing ever matched, and the author concluded the API was broken rather than that the format was wrong. Jellyfin's implementation was otherwise line-for-line what the plugin hand-rolled.
+- Resolution: `RemoveFromPlaylist` deleted; the refresh now calls `_playlistManager.RemoveItemFromPlaylistAsync` with ids formatted via `ToString("N", CultureInfo.InvariantCulture)`. This also removed the `IFileSystem` and `IProviderManager` constructor dependencies, since Jellyfin queues the metadata refresh internally — the task now takes six injected services instead of eight.
+- Residual risk: Still untested end to end. The `"N"` format requirement is load-bearing and invisible — passing the dashed form silently removes nothing, leaving stale items in the playlist. A code comment records this at the call site.
 
 **Playlist id format is load-bearing and undocumented:**
 - Files: `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs` (`FindPlaylists`, `CreateNewPlaylistAsync`)
@@ -191,11 +189,17 @@ Every item below was verified against the code in this repository. Items marked 
 - Risk: Medium-high. This exact class already shipped one silent, total-failure bug of this kind.
 - Priority: Medium. Requires mocking `ILibraryManager` and `IUserDataManager`.
 
-**Regex-on-collection behavior:**
-- What's not tested: There is deliberately no test asserting the current broken behavior. `EngineTest.cs` covers regex only against string properties.
-- Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Engine.cs`
-- Risk: The gap is intentional — add the test alongside the fix, asserting correct behavior.
-- Priority: High, paired with the bug fix.
+**`MaxItems` enforcement:**
+- What's not tested: That `FilterPlaylistItems` actually caps the result. Only the DTO-to-model mapping of the value is asserted.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylist.cs`
+- Risk: Medium. The fix is one `.Take(MaxItems)` call, but a regression would silently produce oversized playlists — the same failure mode as the original bug.
+- Priority: Medium. Blocked on the same mocking work as the refresh pipeline. A tautological test that re-implements `Take` was deliberately **not** added, since it would assert the test's own logic rather than the code's.
+
+**Documented operator matrix:**
+- What's now tested: Every row of the README's operator table is pinned by `EngineTest.cs` — collection `Contains` requiring whole elements, element-wise regex, binary equality on text, and `NotEqual` on booleans.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Engine.cs`, `README.md`
+- Risk: Low, and deliberately so. If someone changes an `Operand` property's type, the corresponding test fails and points at the README row that also needs updating.
+- Priority: Maintain. Add a test row whenever a README row is added.
 
 ---
 

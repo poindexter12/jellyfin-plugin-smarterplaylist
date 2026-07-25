@@ -40,7 +40,7 @@
 | Component | Responsibility | File |
 |-----------|----------------|------|
 | `Plugin` | Registers the plugin with Jellyfin; exposes id, name, description | `Jellyfin.Plugin.SmarterPlaylist/Plugin.cs` |
-| `RefreshAllPlaylists` | Scheduled entry point; orchestrates the whole refresh cycle | `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs` |
+| `RefreshAllPlaylists` | Scheduled entry point; orchestrates the whole refresh cycle (6 injected services) | `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs` |
 | `SmarterPlaylistFileSystem` | Owns the on-disk location of definitions; creates the directory | `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistFileSystem.cs` |
 | `SmarterPlaylistStore` | Serializes definitions to and from JSON | `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistStore.cs` |
 | `SmarterPlaylistDto` | On-disk shape of a definition (the user-facing file format) | `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistDto.cs` |
@@ -105,8 +105,8 @@ Dependencies point strictly downward — the query engine knows nothing about pe
 5. If the definition has no id, or no matching playlist exists, a Jellyfin playlist is created and the returned id is written back to the JSON file (`CreateNewPlaylistAsync`, then `SmarterPlaylistStore.SaveAsync`)
 6. Every candidate library item is fetched for that user (`GetAllUserMedia`)
 7. Each item is projected to an `Operand` and tested against the compiled rules; sets are OR'd, rules within a set are AND'd (`SmarterPlaylist.FilterPlaylistItems`)
-8. Matches are sorted by the selected `Order` and reduced to ids (`SmarterPlaylist.FilterPlaylistItems`)
-9. The playlist's existing children are removed, then the new item set is added (`RemoveFromPlaylist`, then `IPlaylistManager.AddItemToPlaylistAsync`)
+8. Matches are sorted by the selected `Order`, capped at `MaxItems`, and reduced to ids (`SmarterPlaylist.FilterPlaylistItems`)
+9. The playlist's existing children are removed, then the new item set is added (`IPlaylistManager.RemoveItemFromPlaylistAsync` with `"N"`-formatted ids, then `AddItemToPlaylistAsync`)
 
 ### Secondary Path: rule compilation
 
@@ -165,11 +165,12 @@ Dependencies point strictly downward — the query engine knows nothing about pe
 
 ## Anti-Patterns
 
-### Reimplementing a platform API from a misdiagnosis
+### Reimplementing a platform API from a misdiagnosis (fixed — kept as a cautionary example)
 
-**What happens:** `RefreshAllPlaylists.RemoveFromPlaylist` hand-rolls playlist item removal, rewriting `playlist.LinkedChildren` and calling `UpdateToRepositoryAsync` directly. A comment justified it: *"Real PlaylistManagers RemoveFromPlaylist needs an entry ID which seems to not work."*
-**Why it's wrong:** The diagnosis was incorrect. `IPlaylistManager.RemoveItemFromPlaylistAsync` matches on `ItemId?.ToString("N")` — the undashed id format — and the plugin was passing dashed ids. Jellyfin's implementation is otherwise identical to the hand-rolled copy. The workaround reaches past the public API into entity state, so it can break on any Jellyfin release.
-**Do this instead:** Call `_playlistManager.RemoveItemFromPlaylistAsync(playlist.Id.ToString(), ids)` with ids formatted via `ToString("N")`, and delete the private method. This also removes the `IFileSystem` and `IProviderManager` dependencies, since Jellyfin queues the metadata refresh itself.
+**What happened:** `RefreshAllPlaylists.RemoveFromPlaylist` hand-rolled playlist item removal, rewriting `playlist.LinkedChildren` and calling `UpdateToRepositoryAsync` directly. A comment justified it: *"Real PlaylistManagers RemoveFromPlaylist needs an entry ID which seems to not work."*
+**Why it was wrong:** The diagnosis was incorrect. `IPlaylistManager.RemoveItemFromPlaylistAsync` matches on `ItemId?.ToString("N")` — the undashed id format — and the plugin was passing dashed ids. Jellyfin's implementation was otherwise identical to the hand-rolled copy, so ~30 lines of fragile entity manipulation existed solely because of a string-format mismatch.
+**Resolved:** The method is gone; the refresh calls `_playlistManager.RemoveItemFromPlaylistAsync` with `"N"`-formatted ids, and the `IFileSystem`/`IProviderManager` dependencies were dropped.
+**The lesson:** When a platform API "doesn't work", read its implementation before reimplementing it. Jellyfin's id-format conventions (`"N"` in playlist APIs, dashed elsewhere) are undocumented and are the most likely cause of an API appearing broken.
 
 ### Using exceptions as control flow
 

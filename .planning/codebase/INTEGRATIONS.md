@@ -18,7 +18,6 @@ Interfaces consumed, and where:
 - `IUserDataManager` — `QueryEngine/OperandFactory.cs` (per-user play state)
 - `IUserManager` — `ScheduleTasks/RefreshAllPlaylists.cs` (resolving a playlist's owner by name)
 - `IPlaylistManager` — `ScheduleTasks/RefreshAllPlaylists.cs` (creating and populating playlists)
-- `IProviderManager`, `IFileSystem` — `ScheduleTasks/RefreshAllPlaylists.cs` (queueing metadata refresh after edits)
 
 ## Data Storage
 
@@ -61,7 +60,7 @@ Interfaces consumed, and where:
   - `scan-codeql.yaml` — CodeQL on push/PR plus a weekly cron (`24 2 * * 4`)
   - `changelog.yaml`, `sync-labels.yaml`, `command-dispatch.yaml`, `command-rebase.yaml` — repo automation
 - All workflows declare `permissions: read-all`.
-- **Known defect:** `scan-codeql.yaml` still passes `repository-name: jellyfin/jellyfin-plugin-template`, a leftover from the upstream template rather than this repository.
+- The `@master` refs above are correct — they pin the upstream `jellyfin/jellyfin-meta-plugins` reusable workflows, whose default branch really is `master`. Do not "fix" them to `main`.
 
 ## Environment Configuration
 
