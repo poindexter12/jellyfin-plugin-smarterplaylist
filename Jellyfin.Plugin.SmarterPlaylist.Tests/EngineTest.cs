@@ -1,0 +1,185 @@
+using System;
+using Jellyfin.Plugin.SmarterPlaylist.QueryEngine;
+using Xunit;
+
+namespace Jellyfin.Plugin.SmarterPlaylist.Tests
+{
+    public class EngineTest
+    {
+        private static Operand SampleOperand()
+        {
+            var operand = new Operand("The Hunt for Red October")
+            {
+                CommunityRating = 7.6f,
+                IsPlayed = false,
+                MediaType = "Video"
+            };
+
+            operand.Directors.Add("John McTiernan");
+            operand.Genres.Add("Thriller");
+            operand.Genres.Add("Action");
+
+            return operand;
+        }
+
+        [Theory]
+        [InlineData("Directors", "Contains", "John McTiernan", true)]
+        [InlineData("Directors", "Contains", "CGP Grey", false)]
+        [InlineData("Genres", "Contains", "Action", true)]
+        public void CollectionMembersSupportContains(string member, string op, string target, bool expected)
+        {
+            var rule = Engine.CompileRule<Operand>(new Expression(member, op, target));
+
+            Assert.Equal(expected, rule(SampleOperand()));
+        }
+
+        // Documented in README: Contains on a list needs a whole exact element, so partial
+        // names do not match. MatchRegex is the documented escape hatch for partial matching.
+        [Theory]
+        [InlineData("Contains", "McTiernan", false)]
+        [InlineData("Contains", "John", false)]
+        [InlineData("MatchRegex", "McTiernan", true)]
+        public void ContainsOnCollectionRequiresAWholeElement(string op, string target, bool expected)
+        {
+            var rule = Engine.CompileRule<Operand>(new Expression("Directors", op, target));
+
+            Assert.Equal(expected, rule(SampleOperand()));
+        }
+
+        // Documented in README: text members accept the binary Equal/NotEqual operators
+        // in addition to the string methods.
+        [Theory]
+        [InlineData("Equal", "The Hunt for Red October", true)]
+        [InlineData("Equal", "Something Else", false)]
+        [InlineData("NotEqual", "Something Else", true)]
+        public void StringMembersSupportBinaryEquality(string op, string target, bool expected)
+        {
+            var rule = Engine.CompileRule<Operand>(new Expression("Name", op, target));
+
+            Assert.Equal(expected, rule(SampleOperand()));
+        }
+
+        // Documented in README: IsPlayed accepts Equal/NotEqual against True/False.
+        [Theory]
+        [InlineData("NotEqual", "True", true)]
+        [InlineData("NotEqual", "False", false)]
+        public void BooleanMembersSupportNotEqual(string op, string target, bool expected)
+        {
+            var rule = Engine.CompileRule<Operand>(new Expression("IsPlayed", op, target));
+
+            Assert.Equal(expected, rule(SampleOperand()));
+        }
+
+        [Theory]
+        [InlineData("Name", "StartsWith", "The Hunt", true)]
+        [InlineData("Name", "EndsWith", "October", true)]
+        [InlineData("Name", "Contains", "Red", true)]
+        [InlineData("Name", "Equals", "Something Else", false)]
+        public void StringMembersSupportStringMethods(string member, string op, string target, bool expected)
+        {
+            var rule = Engine.CompileRule<Operand>(new Expression(member, op, target));
+
+            Assert.Equal(expected, rule(SampleOperand()));
+        }
+
+        [Theory]
+        [InlineData("IsPlayed", "Equal", "False", true)]
+        [InlineData("IsPlayed", "Equal", "True", false)]
+        [InlineData("CommunityRating", "GreaterThan", "7.0", true)]
+        [InlineData("CommunityRating", "LessThan", "7.0", false)]
+        public void ScalarMembersSupportBinaryOperators(string member, string op, string target, bool expected)
+        {
+            var rule = Engine.CompileRule<Operand>(new Expression(member, op, target));
+
+            Assert.Equal(expected, rule(SampleOperand()));
+        }
+
+        [Theory]
+        [InlineData("MatchRegex", "^Video$", true)]
+        [InlineData("MatchRegex", "^Audio$", false)]
+        [InlineData("NotMatchRegex", "^Audio$", true)]
+        public void RegexOperatorsMatchAgainstStringMembers(string op, string pattern, bool expected)
+        {
+            var rule = Engine.CompileRule<Operand>(new Expression("MediaType", op, pattern));
+
+            Assert.Equal(expected, rule(SampleOperand()));
+        }
+
+        // Regex against a collection must match element-wise. Matching the collection's own
+        // ToString() tests the CLR type name, so MatchRegex never matched and NotMatchRegex
+        // matched everything -- both silently, with no error at any layer.
+        [Theory]
+        [InlineData("Directors", "MatchRegex", "McTiernan", true)]
+        [InlineData("Directors", "MatchRegex", "^John McTiernan$", true)]
+        [InlineData("Directors", "MatchRegex", "Spielberg", false)]
+        [InlineData("Genres", "MatchRegex", "^(Action|Comedy)$", true)]
+        [InlineData("Directors", "NotMatchRegex", "Spielberg", true)]
+        [InlineData("Directors", "NotMatchRegex", "McTiernan", false)]
+        public void RegexOperatorsMatchCollectionMembersElementWise(string member, string op, string pattern, bool expected)
+        {
+            var rule = Engine.CompileRule<Operand>(new Expression(member, op, pattern));
+
+            Assert.Equal(expected, rule(SampleOperand()));
+        }
+
+        [Fact]
+        public void RegexAgainstCollectionDoesNotMatchTheClrTypeName()
+        {
+            var rule = Engine.CompileRule<Operand>(new Expression("Directors", "MatchRegex", "ObjectModel|Collection"));
+
+            Assert.False(rule(SampleOperand()));
+        }
+
+        [Fact]
+        public void RegexAgainstEmptyCollectionDoesNotMatch()
+        {
+            var rule = Engine.CompileRule<Operand>(new Expression("Writers", "MatchRegex", ".*"));
+
+            Assert.False(rule(SampleOperand()));
+        }
+
+        [Fact]
+        public void UnknownMemberNameThrows()
+        {
+            var expression = new Expression("NoSuchProperty", "Equal", "x");
+
+            Assert.ThrowsAny<ArgumentException>(() => Engine.CompileRule<Operand>(expression));
+        }
+
+        [Fact]
+        public void UnknownOperatorThrows()
+        {
+            var expression = new Expression("Name", "NoSuchOperator", "x");
+
+            Assert.Throws<MissingMethodException>(() => Engine.CompileRule<Operand>(expression));
+        }
+
+        [Fact]
+        public void PremiereDateRulesAreRewrittenToUnixSeconds()
+        {
+            var set = new ExpressionSet();
+            set.Expressions.Add(new Expression("PremiereDate", "LessThan", "2020-07-01T00:00:00Z"));
+
+            Engine.FixRules(set);
+
+            Assert.Equal("1593561600", set.Expressions[0].TargetValue);
+        }
+
+        [Fact]
+        public void NonDateRulesAreLeftAlone()
+        {
+            var set = new ExpressionSet();
+            set.Expressions.Add(new Expression("Name", "Contains", "2020-07-01"));
+
+            Engine.FixRules(set);
+
+            Assert.Equal("2020-07-01", set.Expressions[0].TargetValue);
+        }
+
+        [Fact]
+        public void ConvertToUnixTimestampUsesEpochSeconds()
+        {
+            Assert.Equal(0, Engine.ConvertToUnixTimestamp(new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)));
+        }
+    }
+}

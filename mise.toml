@@ -1,0 +1,6 @@
+[tools]
+dotnet = "10"
+
+[env]
+# Plugin targets net9.0 (Jellyfin 10.11 ABI); let the net9 test host run on the installed .NET 10 runtime.
+DOTNET_ROLL_FORWARD = "LatestMajor"

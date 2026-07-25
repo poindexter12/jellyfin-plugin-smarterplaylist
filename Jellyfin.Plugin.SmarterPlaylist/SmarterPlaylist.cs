@@ -1,109 +1,133 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
-using Jellyfin.Data.Entities;
+using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.SmarterPlaylist.QueryEngine;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 
 namespace Jellyfin.Plugin.SmarterPlaylist
 {
+    /// <summary>
+    /// A playlist definition prepared for evaluation against a library.
+    /// </summary>
+    /// <remarks>
+    /// This is the runtime counterpart of <see cref="SmarterPlaylistDto"/>: the on-disk strings are
+    /// resolved into a concrete <see cref="Order"/> and the rules are normalized ready to compile.
+    /// </remarks>
     public class SmarterPlaylist
     {
+        /// <summary>
+        /// Number of items included when the definition does not specify a limit.
+        /// </summary>
+        public const int DefaultMaxItems = 1000;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="SmarterPlaylist"/> class from an on-disk definition.
+        /// </summary>
+        /// <param name="dto">Definition loaded from the playlist's JSON file.</param>
         public SmarterPlaylist(SmarterPlaylistDto dto)
         {
+            ArgumentNullException.ThrowIfNull(dto);
+
             Id = dto.Id;
             Name = dto.Name;
             FileName = dto.FileName;
             User = dto.User;
             ExpressionSets = Engine.FixRuleSets(dto.ExpressionSets);
-            if (dto.MaxItems > 0)
-                MaxItems = dto.MaxItems;
-            else
-                MaxItems = 1000;
+            MaxItems = dto.MaxItems > 0 ? dto.MaxItems : DefaultMaxItems;
 
             Order = dto.Order.Name switch
             {
-                //ToDo It would be nice to move to automapper and create a better way to map this.
-                // Could also use DefinedLimitOrders from emby version.
-                "NoOrder" => new NoOrder(),
-                "Release Date Ascending" => new PremiereDateOrder(),
-                "Release Date Descending" => new PremiereDateOrderDesc(),
+                PremiereDateOrder.OrderName => new PremiereDateOrder(),
+                PremiereDateOrderDesc.OrderName => new PremiereDateOrderDesc(),
                 _ => new NoOrder(),
             };
         }
 
-        public string Id { get; set; }
+        /// <summary>
+        /// Gets or sets the id of the generated Jellyfin playlist, or <c>null</c> before it is first created.
+        /// </summary>
+        public string? Id { get; set; }
+
+        /// <summary>
+        /// Gets or sets the playlist name as it appears in Jellyfin.
+        /// </summary>
         public string Name { get; set; }
+
+        /// <summary>
+        /// Gets or sets the definition's own file name, without the <c>.json</c> extension.
+        /// </summary>
         public string FileName { get; set; }
+
+        /// <summary>
+        /// Gets or sets the name of the user the playlist is generated for.
+        /// </summary>
         public string User { get; set; }
-        public List<ExpressionSet> ExpressionSets { get; set; }
+
+        /// <summary>
+        /// Gets the rule sets that select items, OR'd together.
+        /// </summary>
+        public Collection<ExpressionSet> ExpressionSets { get; }
+
+        /// <summary>
+        /// Gets or sets the maximum number of items to include.
+        /// </summary>
         public int MaxItems { get; set; }
+
+        /// <summary>
+        /// Gets or sets the sort order applied to matched items.
+        /// </summary>
         public Order Order { get; set; }
 
+        /// <summary>
+        /// Selects the items matching this playlist's rules, in the configured order.
+        /// </summary>
+        /// <param name="items">Candidate library items to filter.</param>
+        /// <param name="libraryManager">Library manager used to project items into operands.</param>
+        /// <param name="userDataManager">User data manager used to resolve play state.</param>
+        /// <param name="user">User the playlist is generated for.</param>
+        /// <returns>
+        /// The ids of the matching items, sorted by <see cref="Order"/> and capped at <see cref="MaxItems"/>.
+        /// </returns>
+        public IEnumerable<Guid> FilterPlaylistItems(
+            IEnumerable<BaseItem> items,
+            ILibraryManager libraryManager,
+            IUserDataManager userDataManager,
+            User user)
+        {
+            ArgumentNullException.ThrowIfNull(items);
+
+            var compiledRules = CompileRuleSets();
+            var results = new List<BaseItem>();
+
+            foreach (var item in items)
+            {
+                var operand = OperandFactory.GetMediaType(libraryManager, userDataManager, item, user);
+                if (compiledRules.Any(set => set.All(rule => rule(operand))))
+                {
+                    results.Add(item);
+                }
+            }
+
+            return Order.OrderBy(results).Take(MaxItems).Select(x => x.Id);
+        }
+
+        /// <summary>
+        /// Compiles every rule set into predicates over an <see cref="Operand"/>.
+        /// </summary>
+        /// <returns>One list of predicates per rule set.</returns>
         private List<List<Func<Operand, bool>>> CompileRuleSets()
         {
             var compiledRuleSets = new List<List<Func<Operand, bool>>>();
+
             foreach (var set in ExpressionSets)
-                compiledRuleSets.Add(set.Expressions.Select(r => Engine.CompileRule<Operand>(r)).ToList());
-            return compiledRuleSets;
-        }
-
-        // Returns the ID's of the items, if order is provided the IDs are sorted.
-        public IEnumerable<Guid> FilterPlaylistItems(IEnumerable<BaseItem> items, ILibraryManager libraryManager,
-            User user)
-        {
-            var results = new List<BaseItem>();
-
-            var compiledRules = CompileRuleSets();
-            foreach (var i in items)
             {
-                var operand = OperandFactory.GetMediaType(libraryManager, i, user);
-
-                if (compiledRules.Any(set => set.All(rule => rule(operand)))) results.Add(i);
+                compiledRuleSets.Add(set.Expressions.Select(Engine.CompileRule<Operand>).ToList());
             }
 
-            return Order.OrderBy(results).Select(x => x.Id);
-        }
-
-        private static void Validate()
-        {
-            //Todo create validation for constructor
-        }
-    }
-
-    public abstract class Order
-    {
-        public abstract string Name { get; }
-
-        public virtual IEnumerable<BaseItem> OrderBy(IEnumerable<BaseItem> items)
-        {
-            return items;
-        }
-    }
-
-    public class NoOrder : Order
-    {
-        public override string Name => "NoOrder";
-    }
-
-    public class PremiereDateOrder : Order
-    {
-        public override string Name => "Release Date Ascending";
-
-        public override IEnumerable<BaseItem> OrderBy(IEnumerable<BaseItem> items)
-        {
-            return items.OrderBy(x => x.PremiereDate);
-        }
-    }
-
-    public class PremiereDateOrderDesc : Order
-    {
-        public override string Name => "Release Date Descending";
-
-        public override IEnumerable<BaseItem> OrderBy(IEnumerable<BaseItem> items)
-        {
-            return items.OrderByDescending(x => x.PremiereDate);
+            return compiledRuleSets;
         }
     }
 }
