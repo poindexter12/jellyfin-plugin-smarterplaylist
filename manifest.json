@@ -9,6 +9,14 @@
         "imageUrl": "https://raw.githubusercontent.com/poindexter12/jellyfin-plugin-smarterplaylist/main/assets/logo.png",
         "versions": [
             {
+                "version": "2.9.1",
+                "changelog": "## :sparkles: What's New\n\n### :gear: Code or Repo Maintenance\n\n* Stop release notes recommending an install that breaks Jellyfin (#24) @poindexter12\n\n## Installing\n\n**From the plugin repository (recommended).** Add this URL under\n*Dashboard \u2192 Plugins \u2192 Repositories*, then install **Smarter Playlist** from the catalogue and\nrestart. Updates arrive through Jellyfin's normal plugin update flow.\n\n```\nhttps://raw.githubusercontent.com/poindexter12/jellyfin-plugin-smarterplaylist/main/manifest.json\n```\n\n**Manually.** Extract the `.zip` below into its own folder inside your Jellyfin plugin directory \u2014\nnamed the way the catalogue names it, `Smarter Playlist_<version>` \u2014 then restart.\n\n> **Delete any existing `Smarter Playlist_*` folder first.** Jellyfin loads every plugin folder it\n> finds, so leaving the old one behind registers this plugin twice under the same id. It does not\n> fail loudly: the dashboard reports \"An error occurred while getting the list of currently\n> installed plugins\" and configuration pages stop loading, which looks like a broken release rather\n> than a leftover directory.\n\nThe Jellyfin version this build requires is recorded as `targetAbi` in `build.yaml`.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/poindexter12/jellyfin-plugin-smarterplaylist/releases/download/v2.9.1/smarterplaylist_2.9.1.zip",
+                "checksum": "94462ddcd2a48bc0529ddc7c1c17c463",
+                "timestamp": "2026-07-26T17:20:59Z"
+            },
+            {
                 "version": "2.9.0",
                 "changelog": "## :sparkles: What's New\n\n### :tada: New features and improvements\n\n* Build the playlist when the definition is saved (#22) @poindexter12\n\n### :gear: Code or Repo Maintenance\n\n* docs: make the licensing accurate and complete (#21) @poindexter12\n* Give the plugin a logo in the catalogue (#20) @poindexter12\n\nInstall from the plugin repository, or download `Jellyfin.Plugin.SmarterPlaylist.dll` from the\nassets below and drop it in your Jellyfin plugin directory. The required Jellyfin version is\nrecorded as `targetAbi` in `build.yaml` for this release.",
                 "targetAbi": "10.11.0.0",
