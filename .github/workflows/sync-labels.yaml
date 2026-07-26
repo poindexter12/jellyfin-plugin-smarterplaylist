@@ -1,9 +1,11 @@
 name: '🏷️ Sync labels'
 
-# Labels are part of the issues API, so creating and deleting them needs issues: write.
-# Under read-all this workflow failed on every run.
+# Labels are part of the issues API. The label endpoint reports it accepts
+# "issues=write; pull_requests=write", so both are required -- issues alone still 403s.
+# Under the previous read-all this workflow failed on every run.
 permissions:
   issues: write
+  pull-requests: write
 
 on:
   schedule:
