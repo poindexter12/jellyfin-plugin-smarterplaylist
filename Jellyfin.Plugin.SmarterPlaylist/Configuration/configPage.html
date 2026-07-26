@@ -106,6 +106,15 @@
                             <select is="emby-select" id="spOrder"></select>
                         </div>
 
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="spImage">Cover image</label>
+                            <input is="emby-input" type="text" id="spImage" autocomplete="off" />
+                            <div class="fieldDescription">
+                                Optional. A URL, or a path to a file on the server. Leave empty to build a
+                                cover from the artwork of the playlist&rsquo;s first few items.
+                            </div>
+                        </div>
+
                         <div id="sp-groups"></div>
 
                         <button is="emby-button" type="button" id="sp-add-group" class="raised">
@@ -513,6 +522,7 @@
                     '<option value="">(choose a user)</option>' + options(users, dto.User || '');
                 page.querySelector('#spUser').value = dto.User || '';
                 page.querySelector('#spOrder').innerHTML = options(schema.Orders, (dto.Order && dto.Order.Name) || 'NoOrder');
+                page.querySelector('#spImage').value = dto.Image || '';
                 renderGroups(dto);
             }
 
@@ -534,6 +544,13 @@
                 }
                 if (t.id === 'spOrder') { dto.Order = { Name: t.value }; writeDto(dto); return; }
                 if (t.id === 'spMaxItems') { dto.MaxItems = parseInt(t.value, 10) || 0; writeDto(dto); return; }
+                if (t.id === 'spImage') {
+                    // Removed rather than written as empty, so a cleared field means "generate one"
+                    // instead of "use the image at ''".
+                    if (t.value.trim()) { dto.Image = t.value.trim(); } else { delete dto.Image; }
+                    writeDto(dto);
+                    return;
+                }
 
                 var g = t.getAttribute && t.getAttribute('data-g');
                 var r = t.getAttribute && t.getAttribute('data-r');

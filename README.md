@@ -24,6 +24,7 @@ older versions.
 - [Combining rules with AND and OR](#combining-rules-with-and-and-or)
 - [The JSON format](#the-json-format)
 - [Examples](#examples)
+- [Cover art](#cover-art)
 - [Managing definitions](#managing-definitions)
 - [Troubleshooting](#troubleshooting)
 - [Future work](#future-work)
@@ -254,6 +255,7 @@ per playlist. This is the same file the configuration page reads and writes.
 | `FileName` | no | The definition's own file name, without `.json`. The name on disk always wins: if this field disagrees or is missing, the plugin takes it from the file rather than creating a second playlist. |
 | `Order` | no | `{ "Name": "..." }` — see the sort orders below. Defaults to `NoOrder`. An unrecognised name is a warning, not an error, and falls back to `NoOrder`. |
 | `MaxItems` | no | Caps how many items the playlist holds, applied **after** sorting, so you keep the first N in your chosen order. Omit or set `0` for the default of **1000**. |
+| `Image` | no | A cover image: a URL, or a path to a file the server can read. Omit it to have one generated. See [Cover art](#cover-art). |
 | `Id` | never | Written by the plugin after the playlist is first created. Do not set it yourself. |
 
 Each expression is `MemberName` (the property), `Operator`, and `TargetValue`. **`TargetValue` is
@@ -337,6 +339,34 @@ all series is close to 900 episodes. **Preview matches** tells you the real numb
 ```
 
 ---
+
+## Cover art
+
+A generated playlist gets a cover automatically, so a shelf of them is not a row of identical
+placeholders.
+
+By default the plugin builds a collage from the artwork of the playlist's **first four items**, using
+the same composer Jellyfin uses for collection folders — so it looks like the rest of your library
+rather than something bolted on. With fewer than four items that have artwork, or on a server whose
+image encoder cannot compose, it uses the first item's poster instead.
+
+To choose the picture yourself, set `Image` on the definition, or fill in **Cover image** in the
+editor:
+
+```json
+"Image": "https://example.com/star-trek.jpg"
+```
+
+A URL or a path to a file on the server both work. This is usually what you want for a franchise —
+one poster says more than four episode thumbnails of it.
+
+The cover is only rebuilt when it would actually differ: when the first four items change, when they
+change order, or when you add, change or remove `Image`. Items dropping off the end of a long
+playlist do not trigger a rebuild, because they were never in the picture. Cover state is remembered
+in memory, so a server restart causes one rebuild per playlist and nothing after that.
+
+Cover problems never fail a refresh. If an image cannot be fetched or read, the playlist keeps
+whatever cover it had and the reason goes to the Jellyfin log.
 
 ## Managing definitions
 

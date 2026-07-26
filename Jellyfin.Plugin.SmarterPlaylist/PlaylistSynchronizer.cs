@@ -26,6 +26,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         private static readonly BaseItemKind[] _supportedItems =
             [BaseItemKind.Audio, BaseItemKind.Episode, BaseItemKind.Movie];
 
+        private readonly IPlaylistCoverService _coverService;
         private readonly ILibraryManager _libraryManager;
         private readonly ILogger<Plugin> _logger;
         private readonly IPlaylistManager _playlistManager;
@@ -36,6 +37,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         /// <summary>
         /// Initializes a new instance of the <see cref="PlaylistSynchronizer"/> class.
         /// </summary>
+        /// <param name="coverService">Gives the playlist a cover image.</param>
         /// <param name="libraryManager">Enumerates candidate items.</param>
         /// <param name="logger">Logger for progress and failures.</param>
         /// <param name="playlistManager">Creates and populates playlists.</param>
@@ -43,6 +45,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         /// <param name="userDataManager">Resolves play state.</param>
         /// <param name="userManager">Resolves the user a definition names.</param>
         public PlaylistSynchronizer(
+            IPlaylistCoverService coverService,
             ILibraryManager libraryManager,
             ILogger<Plugin> logger,
             IPlaylistManager playlistManager,
@@ -50,6 +53,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist
             IUserDataManager userDataManager,
             IUserManager userManager)
         {
+            _coverService = coverService;
             _libraryManager = libraryManager;
             _logger = logger;
             _playlistManager = playlistManager;
@@ -123,6 +127,10 @@ namespace Jellyfin.Plugin.SmarterPlaylist
             {
                 _logger.LogDebug("Playlist {Playlist} is already up to date", dto.Name);
 
+                // Still offered the cover: contents being unchanged does not mean the playlist has
+                // the right picture, and one built before covers existed has none at all.
+                await _coverService.ApplyAsync(dto, playlist, filtered.Ids, cancellationToken).ConfigureAwait(false);
+
                 return Succeeded(dto, startedUtc, filtered);
             }
 
@@ -131,6 +139,8 @@ namespace Jellyfin.Plugin.SmarterPlaylist
                 existing.Select(id => id.ToString("N", CultureInfo.InvariantCulture))).ConfigureAwait(false);
 
             await _playlistManager.AddItemToPlaylistAsync(playlist.Id, [.. filtered.Ids], user.Id).ConfigureAwait(false);
+
+            await _coverService.ApplyAsync(dto, playlist, filtered.Ids, cancellationToken).ConfigureAwait(false);
 
             if (filtered.Truncated)
             {

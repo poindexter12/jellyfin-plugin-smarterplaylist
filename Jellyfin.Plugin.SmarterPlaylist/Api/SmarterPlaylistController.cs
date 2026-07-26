@@ -55,6 +55,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
         private static readonly System.Text.RegularExpressions.Regex _safeFileName =
             new("^[A-Za-z0-9._-]{1,64}$", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromSeconds(1));
 
+        private readonly IPlaylistCoverStore _coverStore;
         private readonly ISmarterPlaylistFileSystem _fileSystem;
         private readonly ILibraryManager _libraryManager;
         private readonly ILogger<Plugin> _logger;
@@ -68,6 +69,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
         /// <summary>
         /// Initializes a new instance of the <see cref="SmarterPlaylistController"/> class.
         /// </summary>
+        /// <param name="coverStore">Forgets a deleted definition's cover.</param>
         /// <param name="fileSystem">Locates definition files.</param>
         /// <param name="libraryManager">Enumerates candidate items for preview, and removes deleted playlists.</param>
         /// <param name="logger">Logger for read failures.</param>
@@ -78,6 +80,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
         /// <param name="userDataManager">Resolves play state when projecting items for preview.</param>
         /// <param name="userManager">Resolves the user each definition names.</param>
         public SmarterPlaylistController(
+            IPlaylistCoverStore coverStore,
             ISmarterPlaylistFileSystem fileSystem,
             ILibraryManager libraryManager,
             ILogger<Plugin> logger,
@@ -88,6 +91,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
             IUserDataManager userDataManager,
             IUserManager userManager)
         {
+            _coverStore = coverStore;
             _fileSystem = fileSystem;
             _libraryManager = libraryManager;
             _logger = logger;
@@ -549,9 +553,10 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
                 return NotFound();
             }
 
-            // Keyed by file name, so a definition later created under the same name would otherwise
-            // inherit this one's last outcome.
+            // Both are keyed by file name, so a definition later created under the same name would
+            // otherwise inherit this one's last outcome and its cover.
             _statusStore.Forget(fileName);
+            _coverStore.Forget(fileName);
 
             _logger.LogInformation(
                 "Deleted playlist definition {Playlist} (playlist removed: {Removed})",

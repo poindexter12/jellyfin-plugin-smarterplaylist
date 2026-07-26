@@ -55,5 +55,16 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         /// Gets or sets how the matched items are sorted.
         /// </summary>
         public OrderDto Order { get; set; } = new();
+
+        /// <summary>
+        /// Gets or sets a cover image to use instead of the generated one.
+        /// </summary>
+        /// <remarks>
+        /// A URL, or a path to a file the server can read. Left unset, the plugin builds a collage
+        /// from the artwork of the playlist's first few items, the way Jellyfin does for collections.
+        /// Set it when the generated cover is not what the playlist is about — a franchise is better
+        /// represented by one poster than by four thumbnails of it.
+        /// </remarks>
+        public string? Image { get; set; }
     }
 }
