@@ -61,6 +61,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
         private readonly IPlaylistManager _playlistManager;
         private readonly IRefreshStatusStore _statusStore;
         private readonly ISmarterPlaylistStore _store;
+        private readonly IPlaylistSynchronizer _synchronizer;
         private readonly IUserDataManager _userDataManager;
         private readonly IUserManager _userManager;
 
@@ -73,6 +74,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
         /// <param name="playlistManager">Resolves the live playlist behind each definition.</param>
         /// <param name="statusStore">Last-refresh outcomes.</param>
         /// <param name="store">Removes definition files.</param>
+        /// <param name="synchronizer">Builds the Jellyfin playlist behind a saved definition.</param>
         /// <param name="userDataManager">Resolves play state when projecting items for preview.</param>
         /// <param name="userManager">Resolves the user each definition names.</param>
         public SmarterPlaylistController(
@@ -82,6 +84,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
             IPlaylistManager playlistManager,
             IRefreshStatusStore statusStore,
             ISmarterPlaylistStore store,
+            IPlaylistSynchronizer synchronizer,
             IUserDataManager userDataManager,
             IUserManager userManager)
         {
@@ -91,6 +94,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
             _playlistManager = playlistManager;
             _statusStore = statusStore;
             _store = store;
+            _synchronizer = synchronizer;
             _userDataManager = userDataManager;
             _userManager = userManager;
         }
@@ -446,6 +450,10 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
             // could carry control characters and forge log lines.
             _logger.LogInformation("Saved playlist definition {Playlist}", Path.GetFileNameWithoutExtension(path));
 
+            await ApplyToJellyfinAsync(fileName).ConfigureAwait(false);
+
+            // Read back after applying, so the returned hash covers the id the sync may have stamped
+            // in. Returning the pre-sync hash would make the editor's next save look like a conflict.
             return await BuildDetailAsync(path, fileName).ConfigureAwait(false);
         }
 
@@ -493,6 +501,8 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
 
             await System.IO.File.WriteAllTextAsync(targetPath, request.RawJson).ConfigureAwait(false);
             _logger.LogInformation("Created playlist definition {Playlist}", Path.GetFileNameWithoutExtension(targetPath));
+
+            await ApplyToJellyfinAsync(request.FileName).ConfigureAwait(false);
 
             var detail = await BuildDetailAsync(targetPath, request.FileName).ConfigureAwait(false);
 
@@ -591,6 +601,56 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
                     ex,
                     "Could not read {Playlist} to find its Jellyfin playlist; deleting the definition only",
                     Path.GetFileNameWithoutExtension(path));
+            }
+        }
+
+        /// <summary>
+        /// Builds the Jellyfin playlist for a definition that was just written.
+        /// </summary>
+        /// <remarks>
+        /// Without this a saved definition produced nothing in Jellyfin until the scheduled task next
+        /// ran, up to half an hour later, and the playlist's id was not recorded until then either --
+        /// so the link between definition and playlist did not exist for that whole window.
+        /// <para>
+        /// Failures are recorded, not thrown. The definition is already on disk and the save did
+        /// succeed; refusing it because, say, the library is momentarily unavailable would discard the
+        /// user's edit over something the next scheduled run will retry anyway. The outcome appears on
+        /// the page like any other refresh result.
+        /// </para>
+        /// </remarks>
+        /// <param name="fileName">On-disk name of the definition, without extension.</param>
+        /// <returns>A task that completes once the playlist has been built, or the failure recorded.</returns>
+        private async Task ApplyToJellyfinAsync(string fileName)
+        {
+            var path = ResolvePath(fileName);
+            if (path is null)
+            {
+                return;
+            }
+
+            var startedUtc = DateTime.UtcNow;
+
+            try
+            {
+                var dto = await ReadDefinitionAsync(path).ConfigureAwait(false);
+                var status = await _synchronizer
+                    .SyncAsync(dto, startedUtc, null, HttpContext.RequestAborted)
+                    .ConfigureAwait(false);
+
+                _statusStore.Record(status);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "Saved {Playlist} but could not build its playlist", fileName);
+                _statusStore.Record(new RefreshStatus(
+                    fileName,
+                    startedUtc,
+                    DateTime.UtcNow,
+                    RefreshOutcome.Failed,
+                    null,
+                    null,
+                    ex.GetType().Name,
+                    ex.Message));
             }
         }
 
