@@ -10,6 +10,10 @@ description: >
 
 category: "General"
 owner: "poindexter12"
+# Shown on the plugin's card in Jellyfin's catalogue. Served from the repository rather than a
+# release asset so it is not tied to a version: the catalogue reads one image for the plugin, not
+# one per release. 1920x1080 to match every plugin in Jellyfin's own manifest.
+imageUrl: "https://raw.githubusercontent.com/poindexter12/jellyfin-plugin-smarterplaylist/main/assets/logo.png"
 artifacts:
   - "Jellyfin.Plugin.SmarterPlaylist.dll"
 changelog: |-
