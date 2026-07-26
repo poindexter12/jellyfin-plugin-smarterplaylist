@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -33,6 +34,9 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
             [BaseItemKind.Audio, BaseItemKind.Episode, BaseItemKind.Movie];
 
         private static readonly JsonSerializerOptions _prettyOptions = new() { WriteIndented = true };
+
+        private static readonly System.Text.RegularExpressions.Regex _safeFileName =
+            new("^[A-Za-z0-9._-]{1,64}$", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromSeconds(1));
 
         private readonly ISmarterPlaylistFileSystem _fileSystem;
         private readonly ILibraryManager _libraryManager;
@@ -168,6 +172,257 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
             var summary = BuildSummary(dto, schema, _statusStore.GetAll());
 
             return new DefinitionDetail(summary, Pretty(raw), Hash(raw), summary.Diagnostics);
+        }
+
+        /// <summary>
+        /// Validates definition JSON without writing anything.
+        /// </summary>
+        /// <param name="request">The JSON to check.</param>
+        /// <response code="200">Diagnostics returned; an empty list means the definition is valid.</response>
+        /// <returns>Every problem found.</returns>
+        [HttpPost("Validate")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public ActionResult<IReadOnlyList<Diagnostic>> Validate([FromBody] ValidateRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            return Ok(Inspect(request.RawJson).Diagnostics);
+        }
+
+        /// <summary>
+        /// Overwrites an existing definition.
+        /// </summary>
+        /// <param name="fileName">On-disk name of the definition to replace, without extension.</param>
+        /// <param name="request">Replacement contents and the hash the editor was given.</param>
+        /// <response code="200">Saved.</response>
+        /// <response code="400">The JSON is invalid, or its FileName disagrees with the route.</response>
+        /// <response code="404">No definition with that name exists.</response>
+        /// <response code="409">The file changed on disk since it was loaded.</response>
+        /// <returns>The saved definition.</returns>
+        [HttpPut("Definitions/{fileName}")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<ActionResult<DefinitionDetail>> SaveDefinition(
+            [FromRoute] string fileName,
+            [FromBody] SaveDefinitionRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            var path = ResolvePath(fileName);
+            if (path is null)
+            {
+                return NotFound();
+            }
+
+            var current = await System.IO.File.ReadAllTextAsync(path).ConfigureAwait(false);
+            var currentHash = Hash(current);
+
+            // A stale hash means someone edited the file while this editor was open. Overwriting would
+            // discard their change with no trace, so refuse and hand back what is actually on disk.
+            if (!string.IsNullOrEmpty(request.SourceHash) && !string.Equals(request.SourceHash, currentHash, StringComparison.Ordinal))
+            {
+                return Conflict(new ConflictResponse(
+                    currentHash,
+                    Pretty(current),
+                    "This definition changed on disk after you opened it. Reload to see the current version, or overwrite it."));
+            }
+
+            var inspection = Inspect(request.RawJson);
+            if (inspection.Dto is null || inspection.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
+            {
+                return BadRequest(new ValidationProblem(inspection.Diagnostics));
+            }
+
+            // FileName is the definition's identity and comes from the file on disk. Letting the body
+            // change it would rename by side effect, or leave two files describing one playlist.
+            if (!string.IsNullOrEmpty(inspection.Dto.FileName)
+                && !string.Equals(inspection.Dto.FileName, fileName, StringComparison.Ordinal))
+            {
+                return BadRequest(new ValidationProblem(
+                [
+                    new Diagnostic(
+                        "E15",
+                        DiagnosticSeverity.Error,
+                        $"FileName is '{inspection.Dto.FileName}' but this definition is stored as '{fileName}'. Renaming is not supported here; create a new definition and delete this one.",
+                        "FileName")
+                ]));
+            }
+
+            await System.IO.File.WriteAllTextAsync(path, request.RawJson).ConfigureAwait(false);
+            _logger.LogInformation("Saved playlist definition {Playlist}", fileName);
+
+            return await BuildDetailAsync(path, fileName).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Creates a new definition file.
+        /// </summary>
+        /// <param name="request">Name and contents of the definition to create.</param>
+        /// <response code="201">Created.</response>
+        /// <response code="400">The name or the JSON is invalid.</response>
+        /// <response code="409">A definition with that name already exists.</response>
+        /// <returns>The created definition.</returns>
+        [HttpPost("Definitions")]
+        [ProducesResponseType(StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        [SuppressMessage(
+            "Security",
+            "CA3003:Review code for file path injection vulnerabilities",
+            Justification = "Creating a definition necessarily names a new file. The path is produced by "
+                + "TryResolveNewDefinitionPath, which matches the name against a strict allowlist, rebuilds it "
+                + "from that match so nothing outside the allowlist survives, and asserts the resolved absolute "
+                + "path sits directly inside BasePath. The analyzer cannot follow those guards across the call.")]
+        public async Task<ActionResult<DefinitionDetail>> CreateDefinition([FromBody] CreateDefinitionRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            if (!TryResolveNewDefinitionPath(request.FileName, out var targetPath, out var nameProblem))
+            {
+                return BadRequest(new ValidationProblem([nameProblem!]));
+            }
+
+            if (ResolvePath(request.FileName) is not null)
+            {
+                return Conflict(new ConflictResponse(
+                    string.Empty,
+                    string.Empty,
+                    $"A definition named '{request.FileName}' already exists. Choose another name."));
+            }
+
+            var inspection = Inspect(request.RawJson);
+            if (inspection.Dto is null || inspection.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
+            {
+                return BadRequest(new ValidationProblem(inspection.Diagnostics));
+            }
+
+            await System.IO.File.WriteAllTextAsync(targetPath, request.RawJson).ConfigureAwait(false);
+            _logger.LogInformation("Created playlist definition {Playlist}", request.FileName);
+
+            var detail = await BuildDetailAsync(targetPath, request.FileName).ConfigureAwait(false);
+
+            return Created($"SmarterPlaylist/Definitions/{request.FileName}", detail.Value);
+        }
+
+        /// <summary>
+        /// Turns a requested definition name into a path, or explains why it is not usable.
+        /// </summary>
+        /// <remarks>
+        /// Creating a file inevitably means taking its name from the caller, so this is the one place a
+        /// request value reaches the file system. Three independent guards, in order: the name must match
+        /// a strict allowlist; the name is rebuilt from that match rather than reused, so nothing outside
+        /// the allowlist can survive; and the resolved absolute path must still sit directly inside
+        /// <c>BasePath</c>. The last check is what makes traversal impossible even if the first two are
+        /// ever weakened.
+        /// </remarks>
+        /// <param name="requestedName">Name supplied by the caller.</param>
+        /// <param name="path">Resolved absolute path, when the name is acceptable.</param>
+        /// <param name="problem">Why the name was rejected, when it was.</param>
+        /// <returns><c>true</c> when a safe path was produced.</returns>
+        private bool TryResolveNewDefinitionPath(string requestedName, out string path, out Diagnostic? problem)
+        {
+            path = string.Empty;
+            problem = null;
+
+            var match = _safeFileName.Match(requestedName ?? string.Empty);
+            if (!match.Success)
+            {
+                problem = new Diagnostic(
+                    "E16",
+                    DiagnosticSeverity.Error,
+                    "The file name may contain only letters, numbers, dots, dashes and underscores, and must be 1 to 64 characters.",
+                    "FileName");
+
+                return false;
+            }
+
+            var safeName = new string([.. match.Value]);
+            var basePath = Path.GetFullPath(_fileSystem.BasePath);
+            var candidate = Path.GetFullPath(Path.Join(basePath, safeName + ".json"));
+
+            if (!string.Equals(Path.GetDirectoryName(candidate), basePath.TrimEnd(Path.DirectorySeparatorChar), StringComparison.Ordinal))
+            {
+                problem = new Diagnostic("E16", DiagnosticSeverity.Error, "That file name is not allowed.", "FileName");
+
+                return false;
+            }
+
+            path = candidate;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Parses and validates definition JSON.
+        /// </summary>
+        /// <param name="rawJson">JSON to inspect.</param>
+        /// <returns>The parsed definition, or <c>null</c> with a diagnostic explaining why not.</returns>
+        private (SmarterPlaylistDto? Dto, IReadOnlyList<Diagnostic> Diagnostics) Inspect(string rawJson)
+        {
+            SmarterPlaylistDto? dto;
+
+            try
+            {
+                dto = JsonSerializer.Deserialize<SmarterPlaylistDto>(rawJson);
+            }
+            catch (JsonException ex)
+            {
+                return (null, [new Diagnostic("E00", DiagnosticSeverity.Error, $"This is not valid JSON: {ex.Message}", null)]);
+            }
+
+            if (dto is null)
+            {
+                return (null, [new Diagnostic("E00", DiagnosticSeverity.Error, "This definition is empty.", null)]);
+            }
+
+            var diagnostics = DefinitionValidator.Validate(dto, SchemaBuilder.Build()).ToList();
+
+            // Checked here rather than in the validator because it needs the server's user list. This
+            // is what turns "silently skipped 30 minutes later" into "refused now, with the name".
+            if (!string.IsNullOrWhiteSpace(dto.User) && _userManager.GetUserByName(dto.User) is null)
+            {
+                diagnostics.Insert(0, new Diagnostic(
+                    "E17",
+                    DiagnosticSeverity.Error,
+                    $"No user named '{dto.User}' exists on this server, so this playlist would be skipped every refresh.",
+                    "User"));
+            }
+
+            return (dto, diagnostics);
+        }
+
+        /// <summary>
+        /// Finds the file backing a definition name, without letting the name become a path.
+        /// </summary>
+        /// <param name="fileName">Definition name, without extension.</param>
+        /// <returns>The full path, or <c>null</c> if no such definition exists.</returns>
+        private string? ResolvePath(string fileName) =>
+            _fileSystem.GetAllSmarterPlaylistFilePaths()
+                .FirstOrDefault(p => string.Equals(Path.GetFileNameWithoutExtension(p), fileName, StringComparison.Ordinal));
+
+        /// <summary>
+        /// Builds the detail response for a definition already on disk.
+        /// </summary>
+        /// <param name="path">Full path of the definition file.</param>
+        /// <param name="fileName">Definition name, without extension.</param>
+        /// <returns>The detail response.</returns>
+        [SuppressMessage(
+            "Security",
+            "CA3003:Review code for file path injection vulnerabilities",
+            Justification = "Callers pass a path that either came from enumerating BasePath or from "
+                + "TryResolveNewDefinitionPath, both of which constrain it to BasePath.")]
+        private async Task<ActionResult<DefinitionDetail>> BuildDetailAsync(string path, string fileName)
+        {
+            var raw = await System.IO.File.ReadAllTextAsync(path).ConfigureAwait(false);
+            var inspection = Inspect(raw);
+            var dto = inspection.Dto ?? new SmarterPlaylistDto();
+            dto.FileName = fileName;
+
+            var summary = BuildSummary(dto, SchemaBuilder.Build(), _statusStore.GetAll());
+
+            return new DefinitionDetail(summary, Pretty(raw), Hash(raw), inspection.Diagnostics);
         }
 
         /// <summary>
