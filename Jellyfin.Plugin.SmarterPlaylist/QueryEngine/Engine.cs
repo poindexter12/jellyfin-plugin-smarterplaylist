@@ -28,6 +28,20 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
         private const string NotMatchRegexOperator = "NotMatchRegex";
 
         /// <summary>
+        /// Lowest numeric value treated as a bare year rather than a Unix timestamp.
+        /// </summary>
+        private const double BareYearLowerBound = 1000;
+
+        /// <summary>
+        /// Highest numeric value treated as a bare year rather than a Unix timestamp.
+        /// </summary>
+        /// <remarks>
+        /// As a genuine timestamp this range spans 1970-01-01T00:16:40Z to 1970-01-01T02:46:39Z,
+        /// which nobody filters on, so treating it as a mistyped year costs nothing real.
+        /// </remarks>
+        private const double BareYearUpperBound = 9999;
+
+        /// <summary>
         /// Members held as Unix seconds, whose rule values may be written as readable dates.
         /// </summary>
         private static readonly string[] _dateMembers =
@@ -124,8 +138,18 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
                 return ConvertToUnixTimestamp(parsed).ToString(CultureInfo.InvariantCulture);
             }
 
-            if (double.TryParse(rule.TargetValue, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
+            if (double.TryParse(rule.TargetValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var numeric))
             {
+                // A bare year does not parse as a date, so it would otherwise fall through as a raw
+                // timestamp: "2020" would silently mean 33 minutes after the Unix epoch rather than
+                // the year 2020, matching almost everything. Reject it rather than guess.
+                if (numeric >= BareYearLowerBound && numeric <= BareYearUpperBound)
+                {
+                    throw new ArgumentException(
+                        $"Value '{rule.TargetValue}' for date member '{rule.MemberName}' is ambiguous. Write a full date such as '{rule.TargetValue}-01-01' instead of a bare year.",
+                        nameof(rule));
+                }
+
                 return rule.TargetValue;
             }
 

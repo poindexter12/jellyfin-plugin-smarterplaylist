@@ -77,6 +77,13 @@ Every item below was verified against the code in this repository. Items marked 
 - Verification: `EngineTest.NormalizationDoesNotMutateTheCallersRuleSet` and `RepeatedNormalizationIsStableAcrossASaveReloadCycle`, the latter simulating the full normalize/persist/reload/normalize cycle.
 - Note: found by designing the config page against the real data shape, not by reading the code — two prior review passes over this constructor missed it.
 
+**A bare year in a date rule silently meant 1970 — FIXED 2026-07-25:**
+- Symptoms: `{"MemberName": "PremiereDate", "Operator": "GreaterThan", "TargetValue": "2020"}` compiled without error and matched almost the entire library.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Engine.cs`
+- Cause: introduced by the date fix itself. `DateTime.TryParse("2020", InvariantCulture)` returns **false** (measured, not assumed), so a bare year fell through the numeric passthrough and was taken as a raw timestamp — 1970-01-01T00:33:40Z.
+- Resolution: numeric values in 1000–9999 are rejected with an error telling the user to write a full date. As genuine timestamps that range spans the first three hours of 1970, so nothing real is lost. Rejecting rather than silently reinterpreting was deliberate: a second implicit rule is what created this bug in the first place.
+- Note: the config-page spec places this check in a UI validator, which is not sufficient — hand-edited JSON is a first-class path and bypasses any UI. The guard belongs in the engine.
+
 **Operand took nulls from null-oblivious Jellyfin members — FIXED 2026-07-25:**
 - Symptoms: Any rule on `Album` or `FolderPath` threw `NullReferenceException` per item for anything that is not audio.
 - Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/OperandFactory.cs`

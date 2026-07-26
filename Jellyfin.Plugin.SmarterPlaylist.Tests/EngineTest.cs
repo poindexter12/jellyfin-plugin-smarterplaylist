@@ -231,6 +231,37 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             Assert.Equal("1593561600", Engine.NormalizeRules(set).Expressions[0].TargetValue);
         }
 
+        // A bare year does not parse as a date, so without an explicit guard it falls through the
+        // numeric passthrough as a raw timestamp: "2020" would mean 1970-01-01T00:33:40Z, and a
+        // "released after 2020" rule would match almost the entire library with no error shown.
+        [Theory]
+        [InlineData("2020")]
+        [InlineData("1990")]
+        [InlineData("1000")]
+        [InlineData("9999")]
+        public void BareYearIsRejectedRatherThanReadAsATimestamp(string year)
+        {
+            var set = new ExpressionSet();
+            set.Expressions.Add(new Expression("PremiereDate", "GreaterThan", year));
+
+            var ex = Assert.Throws<ArgumentException>(() => Engine.NormalizeRules(set));
+
+            Assert.Contains(year, ex.Message, StringComparison.Ordinal);
+            Assert.Contains("full date", ex.Message, StringComparison.Ordinal);
+        }
+
+        [Theory]
+        [InlineData("1593561600")]
+        [InlineData("0")]
+        [InlineData("999")]
+        public void NumbersOutsideTheBareYearRangeStayTimestamps(string value)
+        {
+            var set = new ExpressionSet();
+            set.Expressions.Add(new Expression("PremiereDate", "GreaterThan", value));
+
+            Assert.Equal(value, Engine.NormalizeRules(set).Expressions[0].TargetValue);
+        }
+
         [Fact]
         public void UnparseableDateValueThrowsWithTheMemberNamed()
         {
