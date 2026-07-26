@@ -166,10 +166,10 @@ from scratch on the next refresh.
 
 ## Future work
 
-- Add in more properties to be matched against. Please file a feature request if you have ideas. Good candidates Jellyfin already exposes: production year, official rating, tags, runtime, and series name.
+- Add in more properties to be matched against. Please file a feature request if you have ideas. Production year, official rating, tags, runtime and series name have all landed; what is left is whatever Jellyfin exposes that nobody has asked for yet.
 - Add more sorting methods, such as by name, date added, or rating.
 - Explore creating custom property types with custom operators. This is the big one — it would mean replacing the reflection-based rule engine with an explicit operator registry.
-- Allow configuration from the web interface rather than JSON files. A plugin configuration page is possible today; the work is in building a usable rule editor, so a page that simply lists and edits the JSON would be a cheaper first step.
+- Per-user self-service. Definitions are managed by an administrator naming a target user, because a plugin configuration page is only reachable from the dashboard. Letting users manage their own playlists needs a surface that is not the config page.
 
 ## Releasing
 
