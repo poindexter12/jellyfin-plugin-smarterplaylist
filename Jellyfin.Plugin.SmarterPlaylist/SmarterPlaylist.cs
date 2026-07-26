@@ -45,6 +45,11 @@ namespace Jellyfin.Plugin.SmarterPlaylist
                 SeriesEpisodeOrder.OrderName => new SeriesEpisodeOrder(),
                 _ => new NoOrder(),
             };
+
+            ReferencedMembers = ExpressionSets
+                .SelectMany(set => set.Expressions)
+                .Select(rule => rule.MemberName)
+                .ToHashSet(StringComparer.Ordinal);
         }
 
         /// <summary>
@@ -83,6 +88,16 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         public Order Order { get; set; }
 
         /// <summary>
+        /// Gets the members this playlist's rules actually read.
+        /// </summary>
+        /// <remarks>
+        /// Projecting an item is cheap except for its credits and its play state, which are a lookup
+        /// each, per item, per definition. Knowing up front which members are read lets both of those
+        /// be skipped for the definitions that never mention them.
+        /// </remarks>
+        public IReadOnlySet<string> ReferencedMembers { get; }
+
+        /// <summary>
         /// Selects the items matching this playlist's rules, in the configured order.
         /// </summary>
         /// <param name="items">Candidate library items to filter.</param>
@@ -106,7 +121,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist
 
             foreach (var item in items)
             {
-                var operand = OperandFactory.GetMediaType(libraryManager, userDataManager, item, user);
+                var operand = OperandFactory.GetMediaType(libraryManager, userDataManager, item, user, ReferencedMembers);
                 if (compiledRules.Any(set => set.All(rule => rule(operand))))
                 {
                     results.Add(item);

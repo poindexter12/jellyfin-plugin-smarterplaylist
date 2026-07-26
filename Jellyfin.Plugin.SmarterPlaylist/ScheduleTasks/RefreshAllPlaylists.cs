@@ -107,6 +107,11 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
         {
             var dtos = await _plStore.GetAllSmarterPlaylistsAsync().ConfigureAwait(false);
 
+            // Every definition used to re-read the whole library for itself, so ten playlists for one
+            // user meant ten full library enumerations per run. The candidate set depends only on the
+            // user, so it is read once per user and shared by that user's definitions.
+            var mediaByUser = new Dictionary<Guid, IReadOnlyList<BaseItem>>();
+
             for (var i = 0; i < dtos.Length; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -125,7 +130,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
                 // playlist failure or swallowed.
                 try
                 {
-                    var status = await RefreshPlaylistAsync(dto, startedUtc).ConfigureAwait(false);
+                    var status = await RefreshPlaylistAsync(dto, startedUtc, mediaByUser).ConfigureAwait(false);
                     _statusStore.Record(status);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -151,8 +156,12 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
         /// </summary>
         /// <param name="dto">Definition of the playlist to regenerate.</param>
         /// <param name="startedUtc">When this definition's refresh began.</param>
+        /// <param name="mediaByUser">Candidate items already read for a user during this run.</param>
         /// <returns>The outcome, for the caller to record.</returns>
-        private async Task<RefreshStatus> RefreshPlaylistAsync(SmarterPlaylistDto dto, DateTime startedUtc)
+        private async Task<RefreshStatus> RefreshPlaylistAsync(
+            SmarterPlaylistDto dto,
+            DateTime startedUtc,
+            Dictionary<Guid, IReadOnlyList<BaseItem>> mediaByUser)
         {
             var smarterPlaylist = new SmarterPlaylist(dto);
 
@@ -196,8 +205,14 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
                     "The playlist could not be found in Jellyfin after being created.");
             }
 
+            if (!mediaByUser.TryGetValue(user.Id, out var candidates))
+            {
+                candidates = GetAllUserMedia(user);
+                mediaByUser[user.Id] = candidates;
+            }
+
             var playlist = matches[0];
-            var filtered = smarterPlaylist.FilterPlaylistItems(GetAllUserMedia(user), _libraryManager, _userDataManager, user);
+            var filtered = smarterPlaylist.FilterPlaylistItems(candidates, _libraryManager, _userDataManager, user);
 
             var query = new InternalItemsQuery(user)
             {
@@ -279,7 +294,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
         /// </summary>
         /// <param name="user">User whose library is enumerated.</param>
         /// <returns>The candidate items for playlist matching.</returns>
-        private IEnumerable<BaseItem> GetAllUserMedia(User user)
+        private IReadOnlyList<BaseItem> GetAllUserMedia(User user)
         {
             var query = new InternalItemsQuery(user)
             {
