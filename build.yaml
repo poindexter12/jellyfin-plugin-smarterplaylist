@@ -1,7 +1,7 @@
 ---
 name: "Smarter Playlist"
 guid: "3311dfd2-fe3b-4367-a3f0-0dcea5ba07cd"
-version: "2.5.1"
+version: "2.6.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Create dynamic playlists from rules"
@@ -13,4 +13,6 @@ owner: "poindexter12"
 artifacts:
   - "Jellyfin.Plugin.SmarterPlaylist.dll"
 changelog: |-
-  - Make the config page actually load (#12) @poindexter12
+
+  ### New features and improvements ###
+  - Delete a definition, and choose what happens to its playlist (#14) @poindexter12
