@@ -9,6 +9,14 @@
         "imageUrl": null,
         "versions": [
             {
+                "version": "2.7.0",
+                "changelog": "## :sparkles: What's New\n\n### :tada: New features and improvements\n\n* Offer the values a rule can match instead of a blank box (#16) @poindexter12\n\nInstall from the plugin repository, or download `Jellyfin.Plugin.SmarterPlaylist.dll` from the\nassets below and drop it in your Jellyfin plugin directory. The required Jellyfin version is\nrecorded as `targetAbi` in `build.yaml` for this release.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/poindexter12/jellyfin-plugin-smarterplaylist/releases/download/v2.7.0/smarterplaylist_2.7.0.zip",
+                "checksum": "940b85c4794be64590a79a3c2dea392b",
+                "timestamp": "2026-07-26T15:00:42Z"
+            },
+            {
                 "version": "2.6.0",
                 "changelog": "## :sparkles: What's New\n\n### :tada: New features and improvements\n\n* Delete a definition, and choose what happens to its playlist (#14) @poindexter12\n\nInstall from the plugin repository, or download `Jellyfin.Plugin.SmarterPlaylist.dll` from the\nassets below and drop it in your Jellyfin plugin directory. The required Jellyfin version is\nrecorded as `targetAbi` in `build.yaml` for this release.",
                 "targetAbi": "10.11.0.0",
