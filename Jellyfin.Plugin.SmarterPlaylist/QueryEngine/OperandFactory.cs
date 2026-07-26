@@ -16,33 +16,101 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
     internal static class OperandFactory
     {
         /// <summary>
+        /// Members that can only be filled by asking the library for the item's credits.
+        /// </summary>
+        private static readonly string[] _peopleMembers =
+        [
+            nameof(Operand.Actors),
+            nameof(Operand.Composers),
+            nameof(Operand.Directors),
+            nameof(Operand.GuestStars),
+            nameof(Operand.Producers),
+            nameof(Operand.Writers)
+        ];
+
+        /// <summary>
+        /// Flattens a user's candidate items into the records a playlist is selected and sorted from.
+        /// </summary>
+        /// <remarks>
+        /// Done once per user per refresh, not once per definition, and the Jellyfin entities are
+        /// dropped as soon as it returns. <paramref name="needed"/> should be the union of the members
+        /// read by every definition for that user, so a lookup runs at most once per item per refresh
+        /// however many playlists ask for it.
+        /// </remarks>
+        /// <param name="libraryManager">Library manager used to resolve credits.</param>
+        /// <param name="userDataManager">User data manager used to resolve play state.</param>
+        /// <param name="items">Candidate items to flatten.</param>
+        /// <param name="user">User the items are being evaluated for.</param>
+        /// <param name="needed">Members the rules read, or <c>null</c> to fill everything.</param>
+        /// <returns>The flattened candidates, in the order the library returned them.</returns>
+        public static List<PlaylistCandidate> Project(
+            ILibraryManager libraryManager,
+            IUserDataManager userDataManager,
+            IEnumerable<BaseItem> items,
+            User user,
+            IReadOnlySet<string>? needed = null)
+        {
+            ArgumentNullException.ThrowIfNull(items);
+
+            var candidates = new List<PlaylistCandidate>();
+
+            foreach (var item in items)
+            {
+                candidates.Add(new PlaylistCandidate(
+                    item.Id,
+                    item.PremiereDate,
+                    GetMediaType(libraryManager, userDataManager, item, user, needed)));
+            }
+
+            return candidates;
+        }
+
+        /// <summary>
         /// Builds the <see cref="Operand"/> for a library item as seen by a specific user.
         /// </summary>
         /// <remarks>
         /// The result is user-scoped: <see cref="Operand.IsPlayed"/> reflects
         /// <paramref name="user"/>'s play state, not a global one.
+        /// <para>
+        /// Everything here is a plain read off an item the caller already has, except the credits and
+        /// the play state, which are separate lookups per item. Those two are the entire per-item cost
+        /// of evaluating a playlist, so <paramref name="needed"/> exists to skip them when no rule
+        /// asks for them — which, for a definition filtering on genre or year, is both of them.
+        /// </para>
         /// </remarks>
         /// <param name="libraryManager">Library manager used to resolve the item's credited people.</param>
         /// <param name="userDataManager">User data manager used to resolve play state.</param>
         /// <param name="baseItem">Library item to project.</param>
         /// <param name="user">User the item is being evaluated for.</param>
+        /// <param name="needed">
+        /// Members the caller's rules actually read, or <c>null</c> to fill everything. A member left
+        /// unfilled keeps its default, which is safe precisely because nothing reads it.
+        /// </param>
         /// <returns>An operand describing <paramref name="baseItem"/>.</returns>
-        public static Operand GetMediaType(ILibraryManager libraryManager, IUserDataManager userDataManager, BaseItem baseItem, User user)
+        public static Operand GetMediaType(
+            ILibraryManager libraryManager,
+            IUserDataManager userDataManager,
+            BaseItem baseItem,
+            User user,
+            IReadOnlySet<string>? needed = null)
         {
             // MediaBrowser.Controller is compiled without nullable annotations, so these string
             // members are null-oblivious: the compiler accepts them but Album is null on anything
             // that is not audio, and a rule such as Album/Contains would throw per item.
             var operand = new Operand(baseItem.Name ?? string.Empty);
 
-            var people = libraryManager.GetPeople(baseItem);
-            if (people.Count != 0)
+            if (needed is null || Array.Exists(_peopleMembers, needed.Contains))
             {
-                Fill(operand.Actors, people, PersonKind.Actor);
-                Fill(operand.Composers, people, PersonKind.Composer);
-                Fill(operand.Directors, people, PersonKind.Director);
-                Fill(operand.GuestStars, people, PersonKind.GuestStar);
-                Fill(operand.Producers, people, PersonKind.Producer);
-                Fill(operand.Writers, people, PersonKind.Writer);
+                var people = libraryManager.GetPeople(baseItem);
+                if (people.Count != 0)
+                {
+                    Fill(operand.Actors, people, PersonKind.Actor);
+                    Fill(operand.Composers, people, PersonKind.Composer);
+                    Fill(operand.Directors, people, PersonKind.Director);
+                    Fill(operand.GuestStars, people, PersonKind.GuestStar);
+                    Fill(operand.Producers, people, PersonKind.Producer);
+                    Fill(operand.Writers, people, PersonKind.Writer);
+                }
             }
 
             foreach (var genre in baseItem.Genres)
@@ -55,8 +123,12 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
                 operand.Studios.Add(studio);
             }
 
-            var userData = userDataManager.GetUserData(user, baseItem);
-            operand.IsPlayed = userData is not null && baseItem.IsPlayed(user, userData);
+            if (needed is null || needed.Contains(nameof(Operand.IsPlayed)))
+            {
+                var userData = userDataManager.GetUserData(user, baseItem);
+                operand.IsPlayed = userData is not null && baseItem.IsPlayed(user, userData);
+            }
+
             operand.CommunityRating = baseItem.CommunityRating.GetValueOrDefault();
             operand.CriticRating = baseItem.CriticRating.GetValueOrDefault();
             operand.MediaType = baseItem.MediaType.ToString();

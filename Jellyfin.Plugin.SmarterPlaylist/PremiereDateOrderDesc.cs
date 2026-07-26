@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Linq;
-using MediaBrowser.Controller.Entities;
 
 namespace Jellyfin.Plugin.SmarterPlaylist
 {
@@ -18,7 +17,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         public override string Name => OrderName;
 
         /// <inheritdoc />
-        public override IEnumerable<BaseItem> OrderBy(IEnumerable<BaseItem> items)
+        public override IEnumerable<PlaylistCandidate> OrderBy(IEnumerable<PlaylistCandidate> items)
         {
             return items.OrderByDescending(x => x.PremiereDate);
         }

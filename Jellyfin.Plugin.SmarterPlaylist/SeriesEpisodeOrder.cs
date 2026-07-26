@@ -1,7 +1,5 @@
 using System.Collections.Generic;
 using System.Linq;
-using MediaBrowser.Controller.Entities;
-using MediaBrowser.Controller.Entities.TV;
 
 namespace Jellyfin.Plugin.SmarterPlaylist
 {
@@ -24,12 +22,12 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         public override string Name => OrderName;
 
         /// <inheritdoc />
-        public override IEnumerable<BaseItem> OrderBy(IEnumerable<BaseItem> items)
+        public override IEnumerable<PlaylistCandidate> OrderBy(IEnumerable<PlaylistCandidate> items)
         {
             return items
-                .OrderBy(x => x is Episode e ? e.SeriesName ?? string.Empty : x.Name ?? string.Empty, System.StringComparer.Ordinal)
-                .ThenBy(x => (x as Episode)?.ParentIndexNumber ?? 0)
-                .ThenBy(x => (x as Episode)?.IndexNumber ?? 0)
+                .OrderBy(x => x.SeriesSortTitle, System.StringComparer.Ordinal)
+                .ThenBy(x => x.Operand.SeasonNumber)
+                .ThenBy(x => x.Operand.EpisodeNumber)
                 .ThenBy(x => x.PremiereDate);
         }
     }
