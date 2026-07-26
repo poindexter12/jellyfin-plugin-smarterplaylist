@@ -9,6 +9,14 @@
         "imageUrl": null,
         "versions": [
             {
+                "version": "2.5.0",
+                "changelog": "## :sparkles: What's New\n\n### :tada: New features and improvements\n\n* Preview what a definition matches before saving it (#10) @poindexter12\n\nInstall from the plugin repository, or download `Jellyfin.Plugin.SmarterPlaylist.dll` from the\nassets below and drop it in your Jellyfin plugin directory. The required Jellyfin version is\nrecorded as `targetAbi` in `build.yaml` for this release.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/poindexter12/jellyfin-plugin-smarterplaylist/releases/download/v2.5.0/smarterplaylist_2.5.0.zip",
+                "checksum": "5f35a970d468b2ef1a10b06ee94add7c",
+                "timestamp": "2026-07-26T04:22:21Z"
+            },
+            {
                 "version": "2.4.0",
                 "changelog": "## :sparkles: What's New\n\n### :tada: New features and improvements\n\n* Filter by series so a whole franchise can be one playlist (#8) @poindexter12\n\nInstall from the plugin repository, or download `Jellyfin.Plugin.SmarterPlaylist.dll` from the\nassets below and drop it in your Jellyfin plugin directory. The required Jellyfin version is\nrecorded as `targetAbi` in `build.yaml` for this release.",
                 "targetAbi": "10.11.0.0",
