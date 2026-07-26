@@ -53,11 +53,21 @@ Every item below was verified against the code in this repository. Items marked 
 - Resolution: `BuildRegexExpr` now detects `IEnumerable<string>` properties and emits `Enumerable.Any(collection, element => regex.IsMatch(element))`, so a rule matches when any element matches. Non-collection members keep the previous `ToString()` behavior.
 - Verification: Covered by `EngineTest.RegexOperatorsMatchCollectionMembersElementWise`, `RegexAgainstCollectionDoesNotMatchTheClrTypeName`, and `RegexAgainstEmptyCollectionDoesNotMatch`. These fail against the old implementation.
 
-**Hand-authored JSON is reflowed to minified JSON:**
-- Symptoms: The first refresh after creating a definition rewrites the user's formatted file as a single minified line.
+**Hand-authored JSON was reflowed to minified JSON — FIXED 2026-07-25:**
+- Symptoms: The first refresh after creating a definition rewrote the user's formatted file as a single minified line.
 - Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistStore.cs` (`SaveAsync`)
-- Trigger: Create a definition without an `Id`; the plugin stamps the generated id and serializes with default options.
-- Fix approach: Pass `new JsonSerializerOptions { WriteIndented = true }`. Listed as "Pretty Print JSON files" in the README's future work.
+- Resolution: serialized with `WriteIndented = true`. Covered by `SmarterPlaylistStoreTest.SavedDefinitionIsReadableRatherThanMinified`. This was the README's "Pretty Print JSON files" future-work item.
+
+**A divergent FileName forked one definition into two — FIXED 2026-07-25:**
+- Symptoms: A file `foo.json` containing `"FileName": "bar"` caused `bar.json` to be written on first save while `foo.json` remained, so one authored playlist silently became two — both enumerated, both refreshing, both fighting over the same Jellyfin playlist.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistStore.cs`
+- Cause: enumeration returns real file names, but `SaveAsync` writes to the path named by the free-text `FileName` field, and nothing reconciled the two.
+- Resolution: `LoadPlaylistAsync` now takes `FileName` from the file name on disk, making the on-disk name the definition's single identity. Covered by `SmarterPlaylistStoreTest.FileNameIsTakenFromDiskSoADivergentFieldCannotForkTheDefinition`.
+
+**Malformed definitions failed without naming the file — FIXED 2026-07-25:**
+- Symptoms: A JSON typo surfaced as a raw `JsonException` citing only a byte offset, with no indication of which file was at fault — while aborting the refresh of every other playlist.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistStore.cs`
+- Resolution: wrapped in an `InvalidOperationException` naming the file path. Note this only improves diagnosis; the blast-radius problem below is the real fix and is still open.
 
 **Date rules corrupted their own definition file — FIXED 2026-07-25:**
 - Symptoms: A `PremiereDate` rule written as a readable date worked on the first refresh, then permanently aborted **every** playlist's refresh on all subsequent runs.

@@ -64,7 +64,7 @@ To create a new playlist, create a json file in this directory having a format s
 
 - Id: This field is created after the playlist is first rendered. Do not fill this in yourself.
 - Name: Name of the playlist as it will appear in Jellyfin
-- FileName: The actual filename. If you create a file named cgpgrey_playlist.json then this should be cgpgrey_playlist
+- FileName: The definition's own file name, without the `.json` extension. The name on disk wins: if this field disagrees with the actual file name, the plugin corrects it on load rather than creating a second playlist.
 - User: Name of the user for the playlist
 - MaxItems: Optional. Caps how many items the playlist holds, applied after sorting so you keep the first N in your chosen order. Omit it or set it to 0 for the default of 1000.
 - ExpressionSets: This is a list of Expressions. Each expression is OR'ed together.
@@ -102,7 +102,6 @@ Notes:
 
 - Add in more properties to be matched against. Please file a feature request if you have ideas. Good candidates Jellyfin already exposes: production year, official rating, tags, runtime, and series name.
 - Add more sorting methods, such as by name, date added, or rating.
-- Pretty print the JSON files. The plugin currently rewrites your hand-formatted file as a single minified line the first time it stamps in the playlist Id.
 - Explore creating custom property types with custom operators. This is the big one — it would mean replacing the reflection-based rule engine with an explicit operator registry.
 - Allow configuration from the web interface rather than JSON files. A plugin configuration page is possible today; the work is in building a usable rule editor, so a page that simply lists and edits the JSON would be a cheaper first step.
 
