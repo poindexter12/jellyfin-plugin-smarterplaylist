@@ -13,14 +13,14 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
 
         public SmarterPlaylistStoreTest()
         {
-            _basePath = Path.Combine(Path.GetTempPath(), "smarterplaylist-store-" + Guid.NewGuid().ToString("N"));
+            _basePath = Path.Join(Path.GetTempPath(), "smarterplaylist-store-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_basePath);
             _store = new SmarterPlaylistStore(new StubFileSystem(_basePath));
         }
 
         private string WriteDefinition(string fileNameOnDisk, string fileNameField)
         {
-            var path = Path.Combine(_basePath, fileNameOnDisk + ".json");
+            var path = Path.Join(_basePath, fileNameOnDisk + ".json");
             File.WriteAllText(path, $$"""{"Name":"Test","FileName":"{{fileNameField}}","User":"rob"}""");
 
             return path;
@@ -54,8 +54,8 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             await _store.SaveAsync(dto);
 
             Assert.Single(Directory.GetFiles(_basePath, "*.json"));
-            Assert.True(File.Exists(Path.Combine(_basePath, "authored-name.json")));
-            Assert.False(File.Exists(Path.Combine(_basePath, "different-name.json")));
+            Assert.True(File.Exists(Path.Join(_basePath, "authored-name.json")));
+            Assert.False(File.Exists(Path.Join(_basePath, "different-name.json")));
         }
 
         [Fact]
@@ -83,7 +83,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             dto.Id = "abc123";
             await _store.SaveAsync(dto);
 
-            var written = await File.ReadAllTextAsync(Path.Combine(_basePath, "readable.json"));
+            var written = await File.ReadAllTextAsync(Path.Join(_basePath, "readable.json"));
             Assert.Contains("\n", written, StringComparison.Ordinal);
         }
 
@@ -100,7 +100,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
         [Fact]
         public async Task MalformedJsonFailsNamingTheFile()
         {
-            await File.WriteAllTextAsync(Path.Combine(_basePath, "broken.json"), "{ not json");
+            await File.WriteAllTextAsync(Path.Join(_basePath, "broken.json"), "{ not json");
 
             var ex = await Assert.ThrowsAnyAsync<Exception>(() => _store.GetAllSmarterPlaylistsAsync());
 
@@ -123,7 +123,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
 
             public string GetSmarterPlaylistFilePath(string smarterPlaylistId)
             {
-                return Path.Combine(BasePath, smarterPlaylistId + ".json");
+                return Path.Join(BasePath, smarterPlaylistId + ".json");
             }
 
             public string[] GetSmarterPlaylistFilePaths(string userId)
@@ -143,7 +143,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
                     throw new ArgumentException($"'{playlistId}' is not a valid playlist file name", nameof(playlistId));
                 }
 
-                return Path.Combine(BasePath, $"{playlistId}.json");
+                return Path.Join(BasePath, $"{playlistId}.json");
             }
         }
     }

@@ -35,7 +35,8 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
         private readonly ILibraryManager _libraryManager;
         private readonly ILogger<Plugin> _logger;
         private readonly IPlaylistManager _playlistManager;
-        private readonly SmarterPlaylistStore _plStore;
+        private readonly ISmarterPlaylistStore _plStore;
+        private readonly IRefreshStatusStore _statusStore;
         private readonly IUserDataManager _userDataManager;
         private readonly IUserManager _userManager;
 
@@ -45,23 +46,26 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
         /// <param name="libraryManager">Library manager used to enumerate candidate items.</param>
         /// <param name="logger">Logger for task progress and failures.</param>
         /// <param name="playlistManager">Playlist manager used to create and populate playlists.</param>
-        /// <param name="serverApplicationPaths">Server paths used to locate playlist definitions.</param>
+        /// <param name="playlistStore">Store the playlist definitions are read from and written to.</param>
+        /// <param name="statusStore">Records the outcome of each definition's refresh.</param>
         /// <param name="userDataManager">User data manager used to resolve play state.</param>
         /// <param name="userManager">User manager used to resolve the owner of each playlist.</param>
         public RefreshAllPlaylists(
             ILibraryManager libraryManager,
             ILogger<Plugin> logger,
             IPlaylistManager playlistManager,
-            IServerApplicationPaths serverApplicationPaths,
+            ISmarterPlaylistStore playlistStore,
+            IRefreshStatusStore statusStore,
             IUserDataManager userDataManager,
             IUserManager userManager)
         {
             _libraryManager = libraryManager;
             _logger = logger;
             _playlistManager = playlistManager;
+            _plStore = playlistStore;
+            _statusStore = statusStore;
             _userDataManager = userDataManager;
             _userManager = userManager;
-            _plStore = new SmarterPlaylistStore(new SmarterPlaylistFileSystem(serverApplicationPaths));
         }
 
         /// <inheritdoc />
@@ -103,10 +107,42 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
         {
             var dtos = await _plStore.GetAllSmarterPlaylistsAsync().ConfigureAwait(false);
 
-            foreach (var dto in dtos)
+            for (var i = 0; i < dtos.Length; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await RefreshPlaylistAsync(dto).ConfigureAwait(false);
+
+                var dto = dtos[i];
+                var startedUtc = DateTime.UtcNow;
+
+                // One malformed definition must not stop the rest. Before this, any exception here --
+                // an unknown member, a bad operator, an unparseable date -- propagated out and aborted
+                // the entire run, so a single bad file silently froze every other playlist.
+                //
+                // The catch is deliberately broad: the failure modes are open-ended (anything the rule
+                // engine, the JSON layer or a Jellyfin manager can throw), and narrowing it would let an
+                // unanticipated type reintroduce exactly the bug this fixes. Cancellation is excluded,
+                // because stopping the task is a decision from outside that must not be recorded as a
+                // playlist failure or swallowed.
+                try
+                {
+                    var status = await RefreshPlaylistAsync(dto, startedUtc).ConfigureAwait(false);
+                    _statusStore.Record(status);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "Failed to refresh playlist {Playlist}", dto.FileName);
+                    _statusStore.Record(new RefreshStatus(
+                        dto.FileName,
+                        startedUtc,
+                        DateTime.UtcNow,
+                        RefreshOutcome.Failed,
+                        null,
+                        null,
+                        ex.GetType().Name,
+                        ex.Message));
+                }
+
+                progress?.Report((i + 1) * 100.0 / dtos.Length);
             }
         }
 
@@ -114,8 +150,9 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
         /// Regenerates a single playlist, creating it in Jellyfin first if it does not exist yet.
         /// </summary>
         /// <param name="dto">Definition of the playlist to regenerate.</param>
-        /// <returns>A task that completes once the playlist has been repopulated.</returns>
-        private async Task RefreshPlaylistAsync(SmarterPlaylistDto dto)
+        /// <param name="startedUtc">When this definition's refresh began.</param>
+        /// <returns>The outcome, for the caller to record.</returns>
+        private async Task<RefreshStatus> RefreshPlaylistAsync(SmarterPlaylistDto dto, DateTime startedUtc)
         {
             var smarterPlaylist = new SmarterPlaylist(dto);
 
@@ -123,7 +160,16 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
             if (user is null)
             {
                 _logger.LogError("No user named {User} found, please fix playlist {Playlist}", dto.User, dto.Name);
-                return;
+
+                return new RefreshStatus(
+                    dto.FileName,
+                    startedUtc,
+                    DateTime.UtcNow,
+                    RefreshOutcome.SkippedUnknownUser,
+                    null,
+                    null,
+                    null,
+                    $"No user named '{dto.User}' exists on this server.");
             }
 
             var matches = FindPlaylists(user, dto.Id);
@@ -138,11 +184,20 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
             if (matches.Count == 0)
             {
                 _logger.LogError("Playlist {Playlist} could not be resolved after creation", dto.Name);
-                return;
+
+                return new RefreshStatus(
+                    dto.FileName,
+                    startedUtc,
+                    DateTime.UtcNow,
+                    RefreshOutcome.Failed,
+                    null,
+                    null,
+                    "PlaylistNotResolved",
+                    "The playlist could not be found in Jellyfin after being created.");
             }
 
             var playlist = matches[0];
-            var newItems = smarterPlaylist.FilterPlaylistItems(GetAllUserMedia(user), _libraryManager, _userDataManager, user);
+            var filtered = smarterPlaylist.FilterPlaylistItems(GetAllUserMedia(user), _libraryManager, _userDataManager, user);
 
             var query = new InternalItemsQuery(user)
             {
@@ -156,7 +211,26 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
                 .ToList();
 
             await _playlistManager.RemoveItemFromPlaylistAsync(playlist.Id.ToString(), existingIds).ConfigureAwait(false);
-            await _playlistManager.AddItemToPlaylistAsync(playlist.Id, newItems.ToArray(), user.Id).ConfigureAwait(false);
+            await _playlistManager.AddItemToPlaylistAsync(playlist.Id, [.. filtered.Ids], user.Id).ConfigureAwait(false);
+
+            if (filtered.Truncated)
+            {
+                _logger.LogInformation(
+                    "Playlist {Playlist} matched {Matched} items, capped to {Applied} by MaxItems",
+                    dto.Name,
+                    filtered.MatchedCount,
+                    filtered.Ids.Count);
+            }
+
+            return new RefreshStatus(
+                dto.FileName,
+                startedUtc,
+                DateTime.UtcNow,
+                RefreshOutcome.Succeeded,
+                filtered.MatchedCount,
+                filtered.Ids.Count,
+                null,
+                null);
         }
 
         /// <summary>

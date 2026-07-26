@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;
@@ -9,7 +11,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist
     /// <summary>
     /// Plugin entry point registered with the Jellyfin server.
     /// </summary>
-    public class Plugin : BasePlugin<BasePluginConfiguration>
+    public class Plugin : BasePlugin<BasePluginConfiguration>, IHasWebPages
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="Plugin"/> class.
@@ -36,5 +38,21 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         /// <inheritdoc />
         public override string Description =>
             "SmarterPlaylist is a Jellyfin plugin that allows you to create dynamic playlists based on various criteria and conditions.";
+
+        /// <inheritdoc />
+        public IEnumerable<PluginPageInfo> GetPages()
+        {
+            return
+            [
+                new PluginPageInfo
+                {
+                    Name = Name,
+                    EmbeddedResourcePath = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "{0}.Configuration.configPage.html",
+                        GetType().Namespace)
+                }
+            ];
+        }
     }
 }
