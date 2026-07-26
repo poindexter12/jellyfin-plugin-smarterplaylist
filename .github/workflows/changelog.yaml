@@ -4,7 +4,8 @@ name: '📝 Create/Update Release Draft & Release Bump PR'
 # That workflow hard-codes `<Version>${VERSION}.0.0.0</Version>`, which is correct for the
 # Jellyfin org's single-integer versions ("10" -> "10.0.0.0") but produces "2.1.0.0.0.0" for a
 # semver version, which is not a valid assembly version and fails the build. Everything else
-# here mirrors the upstream steps, including syncing targetAbi to the current Jellyfin stable.
+# here mirrors the upstream steps, except that targetAbi follows the referenced Jellyfin version
+# rather than the newest released one -- see the derive step below.
 
 permissions:
   contents: write
@@ -67,22 +68,30 @@ jobs:
           fi
           rm cl.md
 
-          # targetAbi must describe what the plugin was COMPILED against, not the newest server in
-          # existence. The upstream workflow reads api.jellyfin.org's current stable version, which is
-          # only correct if the package references are bumped in the same commit -- otherwise a release
-          # built against 10.11 declares it needs 12.0, and every server that can actually run it
-          # filters it out of the catalogue as too new.
-          CONTROLLER="$(grep -oE 'Include="Jellyfin\.Controller" Version="[0-9.]+"' Jellyfin.Plugin.SmarterPlaylist/Jellyfin.Plugin.SmarterPlaylist.csproj | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+
+      - name: Checkout Repository
+        if: ${{ env.HAS_CHANGES == 'true' }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Derive targetAbi from the referenced Jellyfin version
+        if: ${{ env.HAS_CHANGES == 'true' }}
+        # Must run after checkout: it reads the csproj.
+        #
+        # targetAbi describes what the plugin was COMPILED against, not the newest server in
+        # existence. The upstream workflow reads api.jellyfin.org's current stable version, which is
+        # only correct if the package references are bumped in the same commit -- otherwise a release
+        # built against 10.11 declares it needs 12.0, and every server that can actually run it
+        # filters it out of the catalogue as too new.
+        run: |-
+          set -euo pipefail
+          CONTROLLER="$(grep -oE 'Include="Jellyfin\.Controller" Version="[0-9.]+"' Jellyfin.Plugin.SmarterPlaylist/Jellyfin.Plugin.SmarterPlaylist.csproj | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
           if [[ -z "${CONTROLLER}" ]]; then
             echo "::error::Could not read the Jellyfin.Controller version from the csproj."
             exit 1
           fi
           IFS=. read -r ABI_MAJOR ABI_MINOR _ <<< "${CONTROLLER}"
           echo "ABI_VERSION=${ABI_MAJOR}.${ABI_MINOR}.0.0" >> "$GITHUB_ENV"
-
-      - name: Checkout Repository
-        if: ${{ env.HAS_CHANGES == 'true' }}
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+          echo "targetAbi will be ${ABI_MAJOR}.${ABI_MINOR}.0.0 (built against Jellyfin.Controller ${CONTROLLER})"
 
       - name: Update build.yaml and Directory.Build.props
         if: ${{ env.HAS_CHANGES == 'true' }}
@@ -135,7 +144,7 @@ jobs:
 
             - `build.yaml` version: `${{ env.VERSION }}`
             - Assembly version: `${{ env.ASSEMBLY_VERSION }}`
-            - `targetAbi`: `${{ env.ABI_VERSION }}` (current Jellyfin stable)
+            - `targetAbi`: `${{ env.ABI_VERSION }}` (matches the referenced Jellyfin.Controller)
 
             Merging this does **not** publish. To release: merge, then publish the
             `${{ steps.draft.outputs.tag_name }}` draft release, which triggers the publish workflow.
