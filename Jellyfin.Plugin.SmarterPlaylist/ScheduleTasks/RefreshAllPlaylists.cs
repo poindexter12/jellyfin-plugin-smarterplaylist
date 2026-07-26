@@ -117,12 +117,18 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
                 // One malformed definition must not stop the rest. Before this, any exception here --
                 // an unknown member, a bad operator, an unparseable date -- propagated out and aborted
                 // the entire run, so a single bad file silently froze every other playlist.
+                //
+                // The catch is deliberately broad: the failure modes are open-ended (anything the rule
+                // engine, the JSON layer or a Jellyfin manager can throw), and narrowing it would let an
+                // unanticipated type reintroduce exactly the bug this fixes. Cancellation is excluded,
+                // because stopping the task is a decision from outside that must not be recorded as a
+                // playlist failure or swallowed.
                 try
                 {
                     var status = await RefreshPlaylistAsync(dto, startedUtc).ConfigureAwait(false);
                     _statusStore.Record(status);
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     _logger.LogError(ex, "Failed to refresh playlist {Playlist}", dto.FileName);
                     _statusStore.Record(new RefreshStatus(
