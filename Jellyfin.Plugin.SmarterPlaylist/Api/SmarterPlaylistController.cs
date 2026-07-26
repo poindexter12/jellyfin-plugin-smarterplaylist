@@ -30,6 +30,11 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
     [Produces(MediaTypeNames.Application.Json)]
     public class SmarterPlaylistController : ControllerBase
     {
+        /// <summary>
+        /// How many titles a preview returns. Small on purpose: it runs on every preview.
+        /// </summary>
+        private const int SampleSize = 10;
+
         private static readonly BaseItemKind[] _supportedItems =
             [BaseItemKind.Audio, BaseItemKind.Episode, BaseItemKind.Movie];
 
@@ -43,16 +48,18 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
         private readonly ILogger<Plugin> _logger;
         private readonly IPlaylistManager _playlistManager;
         private readonly IRefreshStatusStore _statusStore;
+        private readonly IUserDataManager _userDataManager;
         private readonly IUserManager _userManager;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="SmarterPlaylistController"/> class.
         /// </summary>
         /// <param name="fileSystem">Locates definition files.</param>
-        /// <param name="libraryManager">Unused directly, reserved for preview endpoints.</param>
+        /// <param name="libraryManager">Enumerates candidate items for preview.</param>
         /// <param name="logger">Logger for read failures.</param>
         /// <param name="playlistManager">Resolves the live playlist behind each definition.</param>
         /// <param name="statusStore">Last-refresh outcomes.</param>
+        /// <param name="userDataManager">Resolves play state when projecting items for preview.</param>
         /// <param name="userManager">Resolves the user each definition names.</param>
         public SmarterPlaylistController(
             ISmarterPlaylistFileSystem fileSystem,
@@ -60,6 +67,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
             ILogger<Plugin> logger,
             IPlaylistManager playlistManager,
             IRefreshStatusStore statusStore,
+            IUserDataManager userDataManager,
             IUserManager userManager)
         {
             _fileSystem = fileSystem;
@@ -67,6 +75,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
             _logger = logger;
             _playlistManager = playlistManager;
             _statusStore = statusStore;
+            _userDataManager = userDataManager;
             _userManager = userManager;
         }
 
@@ -172,6 +181,67 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
             var summary = BuildSummary(dto, schema, _statusStore.GetAll());
 
             return new DefinitionDetail(summary, Pretty(raw), Hash(raw), summary.Diagnostics);
+        }
+
+        /// <summary>
+        /// Reports what a definition would select right now, without saving or touching a playlist.
+        /// </summary>
+        /// <remarks>
+        /// Evaluates the rules against the named user's library exactly as the scheduled task would,
+        /// so the count shown is the count that would be applied. This is the fastest way to catch a
+        /// rule that matches far more or far less than intended, which previously could only be
+        /// discovered by waiting for the next refresh and inspecting the playlist.
+        /// </remarks>
+        /// <param name="request">The definition to evaluate.</param>
+        /// <response code="200">Preview computed.</response>
+        /// <response code="400">The definition is invalid, so it cannot be evaluated.</response>
+        /// <returns>Match counts, a sample of titles, and what the scan cost.</returns>
+        [HttpPost("Preview")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public ActionResult<PreviewResponse> Preview([FromBody] PreviewRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            var inspection = Inspect(request.RawJson);
+            if (inspection.Dto is null || inspection.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
+            {
+                return BadRequest(new ValidationProblem(inspection.Diagnostics));
+            }
+
+            var user = _userManager.GetUserByName(inspection.Dto.User);
+            if (user is null)
+            {
+                return BadRequest(new ValidationProblem(
+                [
+                    new Diagnostic("E17", DiagnosticSeverity.Error, $"No user named '{inspection.Dto.User}' exists on this server.", "User")
+                ]));
+            }
+
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+            var query = new InternalItemsQuery(user) { IncludeItemTypes = _supportedItems, Recursive = true };
+            var candidates = _libraryManager.GetItemsResult(query).Items;
+
+            var playlist = new SmarterPlaylist(inspection.Dto);
+            var filtered = playlist.FilterPlaylistItems(candidates, _libraryManager, _userDataManager, user);
+
+            // Resolve a handful of titles in playlist order so the rules can be sanity-checked, not
+            // just counted. Kept small deliberately: this runs on every preview.
+            var sample = filtered.Ids
+                .Take(SampleSize)
+                .Select(id => _libraryManager.GetItemById(id)?.Name ?? id.ToString())
+                .ToList();
+
+            stopwatch.Stop();
+
+            return new PreviewResponse(
+                filtered.MatchedCount,
+                filtered.Ids.Count,
+                filtered.Truncated,
+                sample,
+                candidates.Count,
+                stopwatch.ElapsedMilliseconds);
         }
 
         /// <summary>

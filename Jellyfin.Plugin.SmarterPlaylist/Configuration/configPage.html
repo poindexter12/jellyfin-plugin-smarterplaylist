@@ -121,9 +121,13 @@
                     </div>
 
                     <p id="sp-validation" role="status" class="fieldDescription"></p>
+                    <div id="sp-preview-result"></div>
                     <div id="sp-editor-problems"></div>
 
                     <div class="verticalSection">
+                        <button is="emby-button" type="button" id="sp-preview" class="raised">
+                            <span>Preview matches</span>
+                        </button>
                         <button is="emby-button" type="button" id="sp-save" class="raised button-submit">
                             <span>Save</span>
                         </button>
@@ -311,6 +315,9 @@
 
             function writeDto(dto) {
                 document.querySelector('#spDefinitionJson').value = JSON.stringify(dto, null, 4);
+                // A preview describes the rules as they were; leaving it up after an edit would
+                // assert a count that is no longer true.
+                document.querySelector('#sp-preview-result').innerHTML = '';
                 scheduleValidation();
             }
 
@@ -520,6 +527,48 @@
                 editor.mode = null;
             }
 
+            // Answers "would this rule actually pick what I think it picks" before saving, which
+            // previously meant waiting for the next scheduled refresh and inspecting the playlist.
+            function preview(page) {
+                var out = page.querySelector('#sp-preview-result');
+                out.innerHTML = '<p class="fieldDescription">Evaluating against the library\u2026</p>';
+
+                ApiClient.ajax({
+                    type: 'POST',
+                    url: ApiClient.getUrl('SmarterPlaylist/Preview'),
+                    data: JSON.stringify({ RawJson: page.querySelector('#spDefinitionJson').value }),
+                    contentType: 'application/json',
+                    dataType: 'json'
+                }).then(function (p) {
+                    var html = '<p>' + icon('playlist_add_check', '') + '<strong>' + esc(p.MatchCount) +
+                        '</strong> item' + (p.MatchCount === 1 ? '' : 's') + ' match';
+                    if (p.Truncated) {
+                        html += ', but only <strong>' + esc(p.AppliedCount) +
+                            '</strong> would be added because of the maximum items setting';
+                    }
+                    html += '.</p>';
+                    html += '<p class="fieldDescription">Scanned ' + esc(p.ScannedCount) +
+                        ' library items in ' + esc(p.ElapsedMs) + ' ms.</p>';
+                    if (p.SampleTitles && p.SampleTitles.length) {
+                        html += '<p class="fieldDescription">First matches, in playlist order:</p><ul style="margin:0 0 0 1.2em;">';
+                        p.SampleTitles.forEach(function (t) { html += '<li>' + esc(t) + '</li>'; });
+                        html += '</ul>';
+                    } else if (p.MatchCount === 0) {
+                        html += '<p class="fieldDescription">Nothing matched. Check the property names and values \u2014 text comparisons are case-sensitive.</p>';
+                    }
+                    out.innerHTML = html;
+                }, function (err) {
+                    parseError(err).then(function (resp) {
+                        if (resp && resp.Diagnostics) {
+                            out.innerHTML = '<p>' + icon('error_outline', '') + 'Cannot preview until the problems above are fixed.</p>';
+                            document.querySelector('#sp-editor-problems').innerHTML = renderDiagnostics(resp.Diagnostics);
+                        } else {
+                            out.innerHTML = '<p>' + icon('error_outline', '') + 'Preview failed. Check the Jellyfin log.</p>';
+                        }
+                    });
+                });
+            }
+
             function reportProblems(resp) {
                 var diags = (resp && resp.Diagnostics) ? resp.Diagnostics : null;
                 if (diags) {
@@ -684,6 +733,7 @@
                 page.querySelector('#sp-pane-rules').addEventListener('click', onBuilderClick);
                 page.querySelector('#sp-add-group').addEventListener('click', onBuilderClick);
 
+                page.querySelector('#sp-preview').addEventListener('click', function () { preview(page); });
                 page.querySelector('#sp-save').addEventListener('click', function () { save(page); });
                 page.querySelector('#sp-cancel').addEventListener('click', function () {
                     if (editor.mode && ta.value !== editor.original
