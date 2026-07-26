@@ -36,6 +36,16 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
         /// </summary>
         private const int SampleSize = 10;
 
+        /// <summary>
+        /// Hard ceiling on how many values one field-values request returns, whatever it asks for.
+        /// </summary>
+        /// <remarks>
+        /// A large library has tens of thousands of credited people. The response is rendered into a
+        /// picker the browser holds in memory, so the cap is what keeps a cast-heavy library from
+        /// turning a helpful list into an unusable one.
+        /// </remarks>
+        private const int MaxFieldValues = 5000;
+
         private static readonly BaseItemKind[] _supportedItems =
             [BaseItemKind.Audio, BaseItemKind.Episode, BaseItemKind.Movie];
 
@@ -247,6 +257,104 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
                 sample,
                 candidates.Count,
                 stopwatch.ElapsedMilliseconds);
+        }
+
+        /// <summary>
+        /// Lists the values a member actually takes in a user's library.
+        /// </summary>
+        /// <remarks>
+        /// Backs the value pickers in the rule builder. Typing these by hand is the plugin's most
+        /// common way to build a rule that quietly matches nothing — <c>Contains</c> compares a whole
+        /// element exactly and case-sensitively, so <c>"Grey"</c> never finds <c>"CGP Grey"</c>, and
+        /// the mistake surfaces only as an empty playlist after the next refresh. Offering the real
+        /// values removes the mistake rather than documenting it.
+        /// </remarks>
+        /// <param name="member">Member to list values for.</param>
+        /// <param name="user">Name of the user whose library to read.</param>
+        /// <param name="limit">Most values to return. Clamped to 1..5000.</param>
+        /// <response code="200">Values returned.</response>
+        /// <response code="400">The member has no listable values, or the user does not exist.</response>
+        /// <returns>The distinct values, sorted.</returns>
+        [HttpGet("FieldValues")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public ActionResult<FieldValuesResponse> GetFieldValues(
+            [FromQuery] string member,
+            [FromQuery] string user,
+            [FromQuery] int limit = 1000)
+        {
+            if (string.IsNullOrWhiteSpace(member) || !LibraryValueSource.IsSupported(member))
+            {
+                return BadRequest(new ValidationProblem(
+                [
+                    new Diagnostic(
+                        "E18",
+                        DiagnosticSeverity.Error,
+                        $"There is no list of values for '{member}'. Type the value you want instead.",
+                        "MemberName")
+                ]));
+            }
+
+            var owner = string.IsNullOrWhiteSpace(user) ? null : _userManager.GetUserByName(user);
+            if (owner is null)
+            {
+                return BadRequest(new ValidationProblem(
+                [
+                    new Diagnostic(
+                        "E17",
+                        DiagnosticSeverity.Error,
+                        $"No user named '{user}' exists on this server, so their library cannot be read.",
+                        "User")
+                ]));
+            }
+
+            var cap = Math.Clamp(limit, 1, MaxFieldValues);
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+            var kind = LibraryValueSource.PersonKindFor(member);
+            var values = kind is null
+                ? ItemBackedValues(member, owner)
+                // PersonTypes is settable only through the constructor, so the query is built rather
+                // than initialised.
+                : _libraryManager.GetPeopleNames(new InternalPeopleQuery([kind.Value.ToString()], [])
+                {
+                    User = owner
+                });
+
+            // Ordinal, to match how the engine compares. A culture-aware sort would group "Émile"
+            // next to "Emile" in the list and then fail to match either against the other.
+            var sorted = values
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)
+                .ToList();
+
+            stopwatch.Stop();
+
+            return new FieldValuesResponse(
+                member,
+                sorted.Count > cap ? sorted.GetRange(0, cap) : sorted,
+                sorted.Count > cap,
+                stopwatch.ElapsedMilliseconds);
+        }
+
+        /// <summary>
+        /// Collects a member's values by reading them off the items the engine would evaluate.
+        /// </summary>
+        /// <remarks>
+        /// One query, then plain property reads. Deliberately not a full operand projection: that
+        /// costs a people lookup and a user-data lookup per item, and none of the members handled
+        /// here need either.
+        /// </remarks>
+        /// <param name="member">Member to read.</param>
+        /// <param name="owner">User whose library is read.</param>
+        /// <returns>Every value found, including duplicates.</returns>
+        private IEnumerable<string> ItemBackedValues(string member, User owner)
+        {
+            var query = new InternalItemsQuery(owner) { IncludeItemTypes = _supportedItems, Recursive = true };
+
+            return _libraryManager.GetItemsResult(query).Items
+                .SelectMany(item => LibraryValueSource.ValuesFrom(member, item));
         }
 
         /// <summary>

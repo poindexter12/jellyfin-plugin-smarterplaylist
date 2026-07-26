@@ -14,6 +14,10 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
     /// <param name="Minimum">Lowest sensible value, for a numeric control. Advisory, not enforced.</param>
     /// <param name="Maximum">Highest sensible value, for a numeric control. Advisory, not enforced.</param>
     /// <param name="Step">Granularity for a numeric control.</param>
+    /// <param name="LibraryValues">
+    /// Whether the values this member takes can be listed from the library, so the UI can offer them
+    /// rather than asking the user to type a name it will only compare exactly.
+    /// </param>
     public sealed record MemberDescriptor(
         string Name,
         string ClrType,
@@ -23,5 +27,6 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
         string? Notes,
         double? Minimum = null,
         double? Maximum = null,
-        double? Step = null);
+        double? Step = null,
+        bool LibraryValues = false);
 }

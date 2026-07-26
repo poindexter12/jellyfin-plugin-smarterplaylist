@@ -295,7 +295,25 @@
                     if (member.Step !== null && member.Step !== undefined) { attrs += ' step="' + member.Step + '"'; }
                     return '<input is="emby-input" type="number"' + common + attrs + ' value="' + esc(rule.TargetValue) + '" />';
                 }
+
+                // A picker, for members whose values the library can list. It is a datalist rather than
+                // a select because free text still has to be allowed: the value may name something not
+                // in the library yet, and the list is capped on large libraries. The browser does the
+                // filtering, so there is no request per keystroke and no combobox to get wrong.
+                if (member.LibraryValues && !isRegexOperator(rule.Operator)) {
+                    var listId = 'sp-list-' + gi + '-' + ri;
+                    return '<input is="emby-input" type="text"' + common +
+                        'list="' + listId + '" autocomplete="off" value="' + esc(rule.TargetValue) + '" />' +
+                        '<datalist id="' + listId + '" data-member="' + esc(member.Name) + '"></datalist>';
+                }
+
                 return '<input is="emby-input" type="text"' + common + 'value="' + esc(rule.TargetValue) + '" />';
+            }
+
+            // Regex values are patterns, not library values. Offering the list there would suggest the
+            // whole name should be typed, which is exactly what regex is for avoiding.
+            function isRegexOperator(op) {
+                return op === 'MatchRegex' || op === 'NotMatchRegex';
             }
 
             function renderGroups(dto) {
@@ -330,6 +348,7 @@
                         html += '<button is="emby-button" type="button" class="raised sp-del-rule" ' +
                             'data-g="' + gi + '" data-r="' + ri + '" title="Remove this rule"><span>Remove</span></button>';
                         html += '</div>';
+                        html += '<div class="fieldDescription" id="sp-list-' + gi + '-' + ri + '-hint" style="margin:-0.25em 0 0 0;"></div>';
                         if (member && member.Notes) {
                             html += '<div class="fieldDescription" style="margin:-0.25em 0 0.75em 0;">' + esc(member.Notes) + '</div>';
                         }
@@ -343,6 +362,111 @@
                 });
 
                 document.querySelector('#sp-groups').innerHTML = html;
+                fillValueLists(dto);
+            }
+
+            // ---- Library value pickers ----------------------------------------------------
+            // Values are per user, because the rules are: a definition names a user and is evaluated
+            // against that user's library. Cached per member and user for the life of the page, since
+            // a library's cast list does not change while an editor is open, and re-fetching on every
+            // re-render would put a full library read behind every rule edit.
+            var fieldValues = {};
+            var loadedValues = {};
+
+            function valuesKey(member, user) { return member + ' ' + user; }
+
+            function loadFieldValues(member, user) {
+                var key = valuesKey(member, user);
+                if (!fieldValues[key]) {
+                    fieldValues[key] = ApiClient.getJSON(ApiClient.getUrl(
+                        'SmarterPlaylist/FieldValues', { member: member, user: user }
+                    )).then(function (res) {
+                        // Held as a set as well as a list: the list fills the picker, the set answers
+                        // "could this value ever match" without rescanning it on every edit.
+                        loadedValues[key] = {
+                            set: new Set(res.Values),
+                            truncated: res.Truncated,
+                            count: res.Values.length
+                        };
+                        return res;
+                    }).catch(function () {
+                        // Not cached as a failure: the field still works as free text, and a later
+                        // render should be free to try again rather than being stuck for the session.
+                        delete fieldValues[key];
+                        return null;
+                    });
+                }
+                return fieldValues[key];
+            }
+
+            function fillValueLists(dto) {
+                var lists = document.querySelectorAll('#sp-groups datalist[data-member]');
+                if (!lists.length) { return; }
+
+                // Without a user there is no library to read, and guessing one would offer values from
+                // somebody else's. The fields stay as plain text until a user is chosen.
+                if (!dto || !dto.User) {
+                    lists.forEach(function (list) {
+                        setHint(list.id, 'Choose a user above to see the values in their library.');
+                    });
+                    return;
+                }
+
+                lists.forEach(function (list) {
+                    var member = list.getAttribute('data-member');
+                    loadFieldValues(member, dto.User).then(function (res) {
+                        if (!res || !res.Values) {
+                            setHint(list.id, 'Could not read the values in this library. Type the value instead.');
+                            return;
+                        }
+                        var html = '';
+                        res.Values.forEach(function (v) { html += '<option value="' + esc(v) + '"></option>'; });
+                        list.innerHTML = html;
+                        refreshValueHints();
+                    });
+                });
+            }
+
+            // Warns about the failure this whole feature exists to prevent: a value spelled plausibly,
+            // saved without complaint, matching nothing at the next refresh. The values are already in
+            // the browser for the picker, so this costs no extra request.
+            function refreshValueHints() {
+                var dto = currentDto();
+                if (!dto || !dto.User || !dto.ExpressionSets) { return; }
+
+                document.querySelectorAll('#sp-groups datalist[data-member]').forEach(function (list) {
+                    var parts = list.id.split('-');
+                    var group = dto.ExpressionSets[+parts[2]];
+                    var rule = group && group.Expressions[+parts[3]];
+                    if (!rule) { return; }
+
+                    var member = list.getAttribute('data-member');
+                    var loaded = loadedValues[valuesKey(member, dto.User)];
+                    if (!loaded) { return; }
+
+                    // A capped list cannot prove absence, so it says nothing about this value and says
+                    // instead that it is showing only part of the library.
+                    if (loaded.truncated) {
+                        setHint(list.id, 'Showing the first ' + loaded.count +
+                            ' values in this library. Others exist, so type the value if it is not listed.');
+                        return;
+                    }
+
+                    var value = rule.TargetValue;
+                    if (!value || loaded.set.has(value)) { setHint(list.id, ''); return; }
+
+                    var descriptor = memberByName(member);
+                    setHint(list.id, descriptor && descriptor.Kind === 'TextList'
+                        ? 'No ' + member + ' in this library is exactly "' + value +
+                          '". Contains needs a whole exact element, so use MatchRegex for partial matches.'
+                        : 'Nothing in this library has ' + member + ' exactly "' + value +
+                          '". Matching is case-sensitive.');
+                });
+            }
+
+            function setHint(listId, text) {
+                var hint = document.querySelector('#' + listId + '-hint');
+                if (hint) { hint.textContent = text; }
             }
 
             function currentDto() {
@@ -398,7 +522,16 @@
                 if (!dto) { return; }
 
                 if (t.id === 'spName') { dto.Name = t.value; writeDto(dto); return; }
-                if (t.id === 'spUser') { dto.User = t.value; writeDto(dto); return; }
+                if (t.id === 'spUser') {
+                    dto.User = t.value;
+                    writeDto(dto);
+                    // The offered values are that user's library, so they have to be re-read. Focus is
+                    // restored because renderBuilder replaces the select that was just used.
+                    renderBuilder();
+                    var userSelect = document.querySelector('#spUser');
+                    if (userSelect) { userSelect.focus(); }
+                    return;
+                }
                 if (t.id === 'spOrder') { dto.Order = { Name: t.value }; writeDto(dto); return; }
                 if (t.id === 'spMaxItems') { dto.MaxItems = parseInt(t.value, 10) || 0; writeDto(dto); return; }
 
@@ -422,12 +555,27 @@
                     if (sel && !rule.Operator) { sel.focus(); }
                     return;
                 }
-                if (f === 'op') { rule.Operator = t.value; writeDto(dto); return; }
+                if (f === 'op') {
+                    var wasRegex = isRegexOperator(rule.Operator);
+                    rule.Operator = t.value;
+                    writeDto(dto);
+                    // Switching between a regex and a plain comparison changes whether the value is a
+                    // pattern or a library value, so the control has to change with it.
+                    if (wasRegex !== isRegexOperator(t.value)) {
+                        renderBuilder();
+                        var op = document.querySelector('#sp-op-' + g + '-' + r);
+                        if (op) { op.focus(); }
+                    }
+                    return;
+                }
                 if (f === 'value') {
                     // Numbers must serialise with an invariant decimal point; a locale comma throws
                     // server-side in Convert.ChangeType.
                     rule.TargetValue = String(t.value);
                     writeDto(dto);
+                    // No re-render: replacing the control the user is typing in would take their
+                    // cursor with it. Only the warning under it is recomputed.
+                    refreshValueHints();
                     return;
                 }
             }
