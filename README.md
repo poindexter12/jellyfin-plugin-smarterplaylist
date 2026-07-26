@@ -28,7 +28,8 @@ older versions.
 - [Troubleshooting](#troubleshooting)
 - [Future work](#future-work)
 - [Releasing](#releasing)
-- [Credits](#credits)
+- [Licence](#licence)
+- [Contributing](#contributing)
 
 ---
 
@@ -420,11 +421,20 @@ to avoid showing two different numbers for one release.
 
 ---
 
-## Credits
+## Licence
 
-Rule engine was inspired by [this](https://stackoverflow.com/questions/6488034/how-to-implement-a-rule-engine)
-post on Stack Overflow.
+[AGPL-3.0-or-later](LICENSE). Copyright (C) 2026 poindexter12.
 
-Initially wanted to convert [ppankiewicz's plugin](https://github.com/ppankiewicz/Emby.SmarterPlaylist.Plugin)
-but found it too incompatible and difficult to work with. Some code was taken from it, mostly around
-interfacing with the filesystem.
+Parts of the definition file system layer come from
+[ppankiewicz/Emby.SmartPlaylist.Plugin](https://github.com/ppankiewicz/Emby.SmartPlaylist.Plugin)
+under the MIT licence. [NOTICE.md](NOTICE.md) records what, and carries the notice that licence
+requires.
+
+## Contributing
+
+Issues are disabled on this repository; open a pull request. Branch names use a `feature/`, `fix/`,
+`perf/` or `docs/` prefix, and the PR label decides the next version number — see
+[Releasing](#releasing).
+
+Run `dotnet build` and `dotnet test` before opening one. The build treats analyser warnings as
+errors, so a clean local build is a good predictor of green CI.
