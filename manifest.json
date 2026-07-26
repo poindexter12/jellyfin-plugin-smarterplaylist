@@ -2,12 +2,20 @@
     {
         "guid": "3311dfd2-fe3b-4367-a3f0-0dcea5ba07cd",
         "name": "Smarter Playlist",
-        "description": "Create dynamic playlists in Jellyfin from rules, similar to smart playlists in iTunes and Plex. Rules are defined as JSON files and refreshed automatically by a scheduled task.",
+        "description": "SmarterPlaylist lets you create dynamic playlists based on rules and conditions (genre, people, ratings, dates, play state, and more). A scheduled task keeps the generated playlists refreshed automatically.\n",
         "overview": "Create dynamic playlists from rules",
         "owner": "poindexter12",
         "category": "General",
-        "imageUrl": null,
+        "imageUrl": "https://raw.githubusercontent.com/poindexter12/jellyfin-plugin-smarterplaylist/main/assets/logo.png",
         "versions": [
+            {
+                "version": "2.9.0",
+                "changelog": "## :sparkles: What's New\n\n### :tada: New features and improvements\n\n* Build the playlist when the definition is saved (#22) @poindexter12\n\n### :gear: Code or Repo Maintenance\n\n* docs: make the licensing accurate and complete (#21) @poindexter12\n* Give the plugin a logo in the catalogue (#20) @poindexter12\n\nInstall from the plugin repository, or download `Jellyfin.Plugin.SmarterPlaylist.dll` from the\nassets below and drop it in your Jellyfin plugin directory. The required Jellyfin version is\nrecorded as `targetAbi` in `build.yaml` for this release.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/poindexter12/jellyfin-plugin-smarterplaylist/releases/download/v2.9.0/smarterplaylist_2.9.0.zip",
+                "checksum": "9c1b49cd5b7db6f8acd3d9cdca1287ee",
+                "timestamp": "2026-07-26T17:12:00Z"
+            },
             {
                 "version": "2.8.0",
                 "changelog": "## :sparkles: What's New\n\n### :ambulance: Major bug fixes\n\n* Stop re-reading and re-projecting the whole library for every definition (#18) @poindexter12\n\nInstall from the plugin repository, or download `Jellyfin.Plugin.SmarterPlaylist.dll` from the\nassets below and drop it in your Jellyfin plugin directory. The required Jellyfin version is\nrecorded as `targetAbi` in `build.yaml` for this release.",
