@@ -12,7 +12,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
 
         public SmarterPlaylistFileSystemTest()
         {
-            _dataPath = Path.Combine(Path.GetTempPath(), "smarterplaylist-tests-" + Guid.NewGuid().ToString("N"));
+            _dataPath = Path.Join(Path.GetTempPath(), "smarterplaylist-tests-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_dataPath);
             _fileSystem = new SmarterPlaylistFileSystem(new StubServerApplicationPaths(_dataPath));
         }
@@ -21,7 +21,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
         public void CreatesThePlaylistDirectoryOnConstruction()
         {
             Assert.True(Directory.Exists(_fileSystem.BasePath));
-            Assert.Equal(Path.Combine(_dataPath, "SmarterPlaylists"), _fileSystem.BasePath);
+            Assert.Equal(Path.Join(_dataPath, "SmarterPlaylists"), _fileSystem.BasePath);
         }
 
         [Fact]
@@ -29,7 +29,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
         {
             var path = _fileSystem.GetSmarterPlaylistPath("any-user", "cgp_grey");
 
-            Assert.Equal(Path.Combine(_fileSystem.BasePath, "cgp_grey.json"), path);
+            Assert.Equal(Path.Join(_fileSystem.BasePath, "cgp_grey.json"), path);
         }
 
         // FileName is user-supplied and becomes the file name, so a traversal sequence would
@@ -78,7 +78,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
 
             public string ConfigurationDirectoryPath => DataPath;
 
-            public string SystemConfigurationFilePath => Path.Combine(DataPath, "system.xml");
+            public string SystemConfigurationFilePath => Path.Join(DataPath, "system.xml");
 
             public string CachePath => DataPath;
 

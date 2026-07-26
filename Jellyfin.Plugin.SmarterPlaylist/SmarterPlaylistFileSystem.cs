@@ -22,7 +22,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         /// <param name="serverApplicationPaths">Server paths used to locate the Jellyfin data directory.</param>
         public SmarterPlaylistFileSystem(IServerApplicationPaths serverApplicationPaths)
         {
-            BasePath = Path.Combine(serverApplicationPaths.DataPath, PlaylistFolderName);
+            BasePath = Path.Join(serverApplicationPaths.DataPath, PlaylistFolderName);
 
             if (!Directory.Exists(BasePath))
             {
@@ -72,7 +72,11 @@ namespace Jellyfin.Plugin.SmarterPlaylist
                 throw new ArgumentException($"'{playlistId}' is not a valid playlist file name", nameof(playlistId));
             }
 
-            return Path.Combine(BasePath, $"{playlistId}.json");
+            // Path.Join, not Path.Combine. Combine discards everything before a rooted segment, so
+            // Combine(BasePath, "/etc/passwd") silently yields "/etc/passwd" -- the base is gone.
+            // Join always keeps the base. The guard above already rejects such input; using Join means
+            // the containment does not depend on that guard being correct.
+            return Path.Join(BasePath, $"{playlistId}.json");
         }
     }
 }
