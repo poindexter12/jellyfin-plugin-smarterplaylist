@@ -1,20 +1,144 @@
 name: '🚀 Publish Plugin'
 
-permissions: read-all
+# The upstream jellyfin-meta-plugins publish workflow deploys over SSH to Jellyfin's own plugin
+# repository host and needs DEPLOY_HOST / DEPLOY_USER / DEPLOY_KEY. Those exist for plugins inside
+# the Jellyfin org; this repo has none, so calling it would fail on every release.
+#
+# Instead this builds the release artifact, attaches it to the release, and regenerates
+# manifest.json on main. Users add the raw manifest URL as a Jellyfin plugin repository, so
+# installs and updates arrive through Jellyfin's own plugin UI.
+
+permissions:
+  contents: write
 
 on:
   release:
     types:
       - released
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to (re)publish, e.g. v2.0.1.0'
+        required: true
+        type: string
 
 jobs:
-  call:
-    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/publish.yaml@master
-    with:
-      version: ${{ github.event.release.tag_name }}
-      is-unstable: ${{ github.event.release.prerelease }}
-    secrets:
-      deploy-host: ${{ secrets.DEPLOY_HOST }}
-      deploy-user: ${{ secrets.DEPLOY_USER }}
-      deploy-key: ${{ secrets.DEPLOY_KEY }}
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Resolve release metadata
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |-
+          set -euo pipefail
+          TAG="${EVENT_TAG:-$INPUT_TAG}"
+          VERSION="${TAG#v}"
+          {
+            echo "TAG=${TAG}"
+            echo "VERSION=${VERSION}"
+            echo "ZIP=smarterplaylist_${VERSION}.zip"
+          } >> "$GITHUB_ENV"
+
+          # build.yaml is the source of truth for what the plugin claims to target.
+          {
+            echo "MANIFEST_ABI=$(yq -r '.targetAbi' build.yaml)"
+            echo "MANIFEST_NAME=$(yq -r '.name' build.yaml)"
+            echo "MANIFEST_GUID=$(yq -r '.guid' build.yaml)"
+            echo "MANIFEST_OVERVIEW=$(yq -r '.overview' build.yaml)"
+            echo "MANIFEST_OWNER=$(yq -r '.owner' build.yaml)"
+            echo "MANIFEST_CATEGORY=$(yq -r '.category' build.yaml)"
+          } >> "$GITHUB_ENV"
+
+      - name: Guard against a version mismatch
+        run: |-
+          set -euo pipefail
+          BUILD_VERSION="$(yq -r '.version' build.yaml)"
+          if [[ "${BUILD_VERSION}" != "${VERSION}" ]]; then
+            echo "::error::Release tag ${TAG} implies version ${VERSION}, but build.yaml says ${BUILD_VERSION}."
+            echo "::error::Merge the release-prep PR before publishing, so the manifest matches the artifact."
+            exit 1
+          fi
+
+      - name: Build and package
+        run: |-
+          set -euo pipefail
+          dotnet build --configuration Release --no-incremental
+          cd Jellyfin.Plugin.SmarterPlaylist/bin/Release/net9.0
+          zip -j "${GITHUB_WORKSPACE}/${ZIP}" Jellyfin.Plugin.SmarterPlaylist.dll
+          cd "${GITHUB_WORKSPACE}"
+          echo "CHECKSUM=$(md5sum "${ZIP}" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
+      - name: Attach artifact to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${TAG}" "${ZIP}" --clobber
+
+      - name: Regenerate manifest.json
+        env:
+          CHANGELOG: ${{ github.event.release.body }}
+        run: |-
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, datetime, pathlib
+
+          version   = os.environ['VERSION']
+          repo      = os.environ['GITHUB_REPOSITORY']
+          source    = f"https://github.com/{repo}/releases/download/{os.environ['TAG']}/{os.environ['ZIP']}"
+          changelog = (os.environ.get('CHANGELOG') or '').strip() or f"Release {version}"
+
+          entry = {
+              "version":   version,
+              "changelog": changelog,
+              "targetAbi": os.environ['MANIFEST_ABI'],
+              "sourceUrl": source,
+              "checksum":  os.environ['CHECKSUM'],
+              "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+          }
+
+          path = pathlib.Path('manifest.json')
+          manifest = json.loads(path.read_text()) if path.exists() else []
+          if not manifest:
+              manifest = [{
+                  "guid": os.environ['MANIFEST_GUID'],
+                  "name": os.environ['MANIFEST_NAME'],
+                  "description": os.environ['MANIFEST_OVERVIEW'],
+                  "overview": os.environ['MANIFEST_OVERVIEW'],
+                  "owner": os.environ['MANIFEST_OWNER'],
+                  "category": os.environ['MANIFEST_CATEGORY'],
+                  "imageUrl": None,
+                  "versions": [],
+              }]
+
+          # Newest first, and republishing a tag replaces its entry rather than duplicating it.
+          versions = [v for v in manifest[0]['versions'] if v['version'] != version]
+          versions.insert(0, entry)
+          manifest[0]['versions'] = versions
+
+          path.write_text(json.dumps(manifest, indent=4) + "\n")
+          PY
+
+      - name: Commit manifest
+        run: |-
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet manifest.json; then
+            echo "manifest.json unchanged"
+            exit 0
+          fi
+          git add manifest.json
+          git commit -m "chore: publish ${TAG} to the plugin manifest [skip ci]"
+          git push origin main
