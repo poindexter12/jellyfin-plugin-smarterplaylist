@@ -1,0 +1,17 @@
+<Project>
+
+  <!-- Single source of truth for the plugin's version.
+       The release-prep workflow rewrites all three elements together, and keeps them in step
+       with `version` in build.yaml. Jellyfin surfaces the assembly version as the plugin's
+       version in the dashboard (BasePlugin.Version reads it), so build.yaml and the assembly
+       drifting apart shows the user two different numbers for the same release.
+
+       Assembly versions must be 4-part, so the semver in build.yaml is padded: 2.1.0 -> 2.1.0.0.
+       Do not hand-edit; let the release PR do it. -->
+  <PropertyGroup>
+    <Version>2.0.0.0</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
+  </PropertyGroup>
+
+</Project>

@@ -1,6 +1,9 @@
 name: '🏷️ Sync labels'
 
-permissions: read-all
+# Labels are part of the issues API, so creating and deleting them needs issues: write.
+# Under read-all this workflow failed on every run.
+permissions:
+  issues: write
 
 on:
   schedule:

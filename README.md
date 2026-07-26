@@ -106,6 +106,28 @@ Notes:
 - Explore creating custom property types with custom operators. This is the big one — it would mean replacing the reflection-based rule engine with an explicit operator registry.
 - Allow configuration from the web interface rather than JSON files. A plugin configuration page is possible today; the work is in building a usable rule editor, so a page that simply lists and edits the JSON would be a cheaper first step.
 
+## Releasing
+
+Releases are automated. Version numbers come from the labels on merged PRs, so labelling is the
+only manual step.
+
+1. Merge a PR into `main`. The **Create/Update Release Draft & Release Bump PR** workflow updates a
+   draft release and opens a `Prepare for release vX.Y.Z` PR.
+2. That PR bumps `version` in `build.yaml`, the three version elements in `Directory.Build.props`,
+   and sets `targetAbi` to whatever Jellyfin stable currently reports. It also builds, so a version
+   that would not compile never reaches a release.
+3. Merge the prepare PR, then publish the draft release. Publishing triggers the **Publish Plugin**
+   workflow, which deploys to the plugin repository.
+
+Version resolution follows the PR labels: `breaking`, `removed`, `major-feature` or
+`major-enhancement` bump major; `feature`, `enhancement`, `major-bug` or `deprecated` bump minor;
+anything else is a patch. Label a PR `skip-changelog` to leave it out of the notes entirely.
+The label set is kept in sync from Jellyfin's shared definitions by the **Sync labels** workflow.
+
+Do not hand-edit versions. `Directory.Build.props` is the single source of truth for the assembly
+version, and Jellyfin shows that version in the dashboard, so it and `build.yaml` are bumped
+together to avoid showing two different numbers for one release.
+
 ## Credits
 
 Rule engine was inspired by [this](https://stackoverflow.com/questions/6488034/how-to-implement-a-rule-engine "this") post in Stack Overflow.

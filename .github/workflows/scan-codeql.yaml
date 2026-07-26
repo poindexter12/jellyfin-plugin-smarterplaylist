@@ -1,6 +1,11 @@
 name: '🔬 Run CodeQL'
 
-permissions: read-all
+# read-all is not sufficient: codeql-action/analyze uploads results to code scanning, which
+# needs security-events: write. With read-all the scan runs and then fails at the upload step.
+permissions:
+  actions: read
+  contents: read
+  security-events: write
 
 on:
   push:
