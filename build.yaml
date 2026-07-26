@@ -1,7 +1,7 @@
 ---
 name: "Smarter Playlist"
 guid: "3311dfd2-fe3b-4367-a3f0-0dcea5ba07cd"
-version: "2.9.0"
+version: "2.9.1"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Create dynamic playlists from rules"
@@ -18,9 +18,5 @@ artifacts:
   - "Jellyfin.Plugin.SmarterPlaylist.dll"
 changelog: |-
 
-  ### New features and improvements ###
-  - Build the playlist when the definition is saved (#22) @poindexter12
-
   ### Code or Repo Maintenance ###
-  - docs: make the licensing accurate and complete (#21) @poindexter12
-  - Give the plugin a logo in the catalogue (#20) @poindexter12
+  - Stop release notes recommending an install that breaks Jellyfin (#24) @poindexter12
