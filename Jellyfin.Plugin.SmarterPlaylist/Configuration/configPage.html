@@ -850,6 +850,21 @@
                 });
             }
 
+            // Saving builds the playlist rather than waiting for the scheduled task, so the result of
+            // that is worth stating: "saved" alone no longer describes everything that happened.
+            function playlistOutcome(d) {
+                var s = d && d.Summary;
+                if (!s) { return ''; }
+                if (s.PlaylistState === 'Ok' || s.PlaylistState === 2) {
+                    var n = s.PlaylistItemCount;
+                    if (n === null || n === undefined) { return 'Playlist updated.'; }
+                    return 'Playlist has ' + n + ' item' + (n === 1 ? '' : 's') + '.';
+                }
+                var r = s.LastRefresh;
+                if (r && r.ErrorMessage) { return 'The playlist could not be built: ' + r.ErrorMessage; }
+                return 'The playlist will be built by the next scheduled refresh.';
+            }
+
             function reportProblems(resp) {
                 var diags = (resp && resp.Diagnostics) ? resp.Diagnostics : null;
                 if (diags) {
@@ -872,7 +887,7 @@
                         contentType: 'application/json',
                         dataType: 'json'
                     }).then(function (d) {
-                        Dashboard.alert('Created ' + name + '.json');
+                        Dashboard.alert('Created ' + name + '.json. ' + playlistOutcome(d));
                         closeEditor();
                         load(page);
                     }, function (err) {
@@ -893,7 +908,7 @@
                     // The delete confirmation names the playlist and its item count from this. Left
                     // stale, deleting after a rename would ask about the playlist's previous name.
                     editor.summary = d.Summary;
-                    setValidation('Saved. ' + summariseDiagnostics(d.Diagnostics));
+                    setValidation('Saved. ' + playlistOutcome(d) + ' ' + summariseDiagnostics(d.Diagnostics));
                     document.querySelector('#sp-editor-problems').innerHTML = renderDiagnostics(d.Diagnostics);
                     load(page);
                 }, function (err) {

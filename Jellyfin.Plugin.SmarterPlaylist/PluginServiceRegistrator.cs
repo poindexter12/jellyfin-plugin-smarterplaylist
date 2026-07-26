@@ -20,6 +20,10 @@ namespace Jellyfin.Plugin.SmarterPlaylist
             serviceCollection.AddSingleton<IRefreshStatusStore, RefreshStatusStore>();
             serviceCollection.AddSingleton<ISmarterPlaylistFileSystem, SmarterPlaylistFileSystem>();
             serviceCollection.AddSingleton<ISmarterPlaylistStore, SmarterPlaylistStore>();
+
+            // Shared by the scheduled task and the configuration page's save, so that a playlist
+            // created when a definition is saved is built the same way the task would build it.
+            serviceCollection.AddSingleton<IPlaylistSynchronizer, PlaylistSynchronizer>();
         }
     }
 }

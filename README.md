@@ -67,8 +67,8 @@ playlist is one `.json` file in there.
    order, and whether the maximum-items cap would discard any.
 6. **Save.**
 
-The playlist appears in Jellyfin at the next refresh, or immediately if you run the scheduled task
-yourself (below).
+The playlist is created in Jellyfin as soon as you save, already filled with what the rules select.
+It then stays in sync through the scheduled refresh below.
 
 You never have to touch JSON — but the files are plain JSON and hand-editing them is fully
 supported. See [The JSON format](#the-json-format).
@@ -82,12 +82,19 @@ definition. It runs **every 30 minutes** by default.
 
 To change the interval or run it now: *Dashboard → Scheduled Tasks → Refresh all SmarterPlaylists*.
 
+Saving a definition builds its playlist there and then, so you do not have to wait for the task to
+see it. The task is what keeps it current afterwards.
+
 Each refresh re-evaluates the rules against the library and replaces the playlist's contents. So:
 
 - New matching items appear automatically.
 - Items that stop matching (you watched them, say) drop out.
 - **Anything you add to the playlist by hand in Jellyfin is removed at the next refresh.** The
   definition is the source of truth.
+- **Watched state is never affected.** It belongs to the library item, not to the playlist entry, so
+  rebuilding a playlist leaves played flags and resume positions alone. A rule on `IsPlayed` is the
+  one thing that connects them: watch something and it leaves an "unwatched" playlist next refresh.
+- A playlist whose contents have not changed is left completely untouched, rather than rewritten.
 
 One broken definition never stops the others. If a definition fails, the failure is recorded against
 that definition and shown on the configuration page; every other playlist still refreshes.
@@ -364,8 +371,9 @@ matches**; if it reports 0, the rules are the problem, not the refresh. See
 [Rules that quietly match nothing](#rules-that-quietly-match-nothing).
 
 **My playlist has not appeared.**
-Playlists are created on the first successful refresh. Run *Dashboard → Scheduled Tasks → Refresh all
-SmarterPlaylists*, or wait for the next 30-minute run.
+Saving should create it immediately. If it did not, the page says why underneath the editor — most
+often the definition names a user who does not exist. Fix that and save again, or run
+*Dashboard → Scheduled Tasks → Refresh all SmarterPlaylists*.
 
 **The configuration page shows a problem against my definition.**
 The message names the property and what is wrong with it. Fix it in the editor and save — the save
