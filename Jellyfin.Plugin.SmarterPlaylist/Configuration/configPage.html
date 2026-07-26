@@ -1,0 +1,213 @@
+<div id="SmarterPlaylistConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
+     data-controller="__plugin/smarterplaylist">
+    <div data-role="content">
+        <div class="content-primary">
+
+            <div class="verticalSection">
+                <div class="sectionTitleContainer flex align-items-center">
+                    <h2 class="sectionTitle">Smarter Playlist</h2>
+                </div>
+                <p class="fieldDescription" id="sp-basepath">Loading…</p>
+                <p class="fieldDescription">
+                    Playlists are rebuilt by the <strong>Refresh all SmarterPlaylists</strong> scheduled task.
+                    Run it from Dashboard &rarr; Scheduled Tasks to apply changes immediately.
+                </p>
+            </div>
+
+            <div class="verticalSection">
+                <button is="emby-button" type="button" id="sp-reload" class="raised">
+                    <span>Reload</span>
+                </button>
+            </div>
+
+            <p id="sp-status" role="status" class="fieldDescription"></p>
+
+            <div id="sp-loaderrors" class="verticalSection hide">
+                <h3 class="sectionTitle">Files that could not be read</h3>
+                <div id="sp-loaderrors-body"></div>
+            </div>
+
+            <div id="sp-empty" class="verticalSection hide">
+                <h3 class="sectionTitle">No playlists yet</h3>
+                <p class="fieldDescription">
+                    Create a <code>.json</code> file in the folder above to define a playlist.
+                    The README documents the format and every property you can filter on.
+                </p>
+            </div>
+
+            <div id="sp-table-wrap" class="verticalSection hide" style="overflow-x:auto;">
+                <table class="tblSmarterPlaylists" style="width:100%;border-collapse:collapse;">
+                    <caption class="clipForScreenReader">Smarter playlist definitions and their last refresh</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col" style="text-align:left;padding:0.6em 0.5em;">Name</th>
+                            <th scope="col" style="text-align:left;padding:0.6em 0.5em;">User</th>
+                            <th scope="col" style="text-align:left;padding:0.6em 0.5em;">Rules</th>
+                            <th scope="col" style="text-align:left;padding:0.6em 0.5em;">Items</th>
+                            <th scope="col" style="text-align:left;padding:0.6em 0.5em;">Last refresh</th>
+                            <th scope="col" style="text-align:left;padding:0.6em 0.5em;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sp-rows"></tbody>
+                </table>
+            </div>
+
+            <div id="sp-detail" class="verticalSection hide">
+                <h3 class="sectionTitle" id="sp-detail-title" tabindex="-1"></h3>
+                <div id="sp-detail-body"></div>
+            </div>
+
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        (function () {
+            var pluginId = '3311dfd2-fe3b-4367-a3f0-0dcea5ba07cd';
+
+            function esc(s) {
+                return String(s === null || s === undefined ? '' : s)
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+            }
+
+            function icon(name, cls) {
+                return '<span class="material-icons ' + cls + '" aria-hidden="true" style="font-size:1.1em;vertical-align:-0.15em;margin-inline-end:0.25em;">' + name + '</span>';
+            }
+
+            function relTime(iso) {
+                if (!iso) { return 'Never since restart'; }
+                var then = new Date(iso).getTime();
+                if (isNaN(then)) { return 'Unknown'; }
+                var mins = Math.floor((Date.now() - then) / 60000);
+                if (mins < 1) { return 'Just now'; }
+                if (mins < 60) { return mins + ' min ago'; }
+                var hrs = Math.floor(mins / 60);
+                if (hrs < 24) { return hrs + ' hr ago'; }
+                return Math.floor(hrs / 24) + ' d ago';
+            }
+
+            // Status is icon + text, never colour alone: Jellyfin ships no accessible success or
+            // warning token, and its error red does not meet contrast on the dark theme.
+            function statusCell(d) {
+                var errs = (d.Diagnostics || []).filter(function (x) { return x.Severity === 'Error' || x.Severity === 0; });
+                if (errs.length) {
+                    return icon('error_outline', '') + esc(errs.length) + ' problem' + (errs.length === 1 ? '' : 's');
+                }
+                if (!d.UserExists) {
+                    return icon('person_off', '') + 'Unknown user';
+                }
+                var r = d.LastRefresh;
+                if (!r) { return icon('schedule', '') + 'Not run yet'; }
+                if (r.Outcome === 'Failed' || r.Outcome === 1) { return icon('error_outline', '') + 'Failed'; }
+                if (r.Outcome === 'SkippedUnknownUser' || r.Outcome === 2) { return icon('person_off', '') + 'Skipped'; }
+                return icon('check_circle_outline', '') + 'OK';
+            }
+
+            function itemsCell(d) {
+                if (d.PlaylistState === 'NotCreated' || d.PlaylistState === 0) { return 'Not created yet'; }
+                if (d.PlaylistState === 'Missing' || d.PlaylistState === 1) { return 'Playlist missing'; }
+                var main = (d.PlaylistItemCount === null || d.PlaylistItemCount === undefined) ? '—' : d.PlaylistItemCount;
+                var r = d.LastRefresh;
+                if (r && r.MatchedCount !== null && r.AppliedCount !== null && r.MatchedCount > r.AppliedCount) {
+                    return esc(main) + '<div class="fieldDescription">capped from ' + esc(r.MatchedCount) + ' at the last refresh</div>';
+                }
+                return esc(main);
+            }
+
+            function renderDiagnostics(list) {
+                if (!list || !list.length) { return ''; }
+                var html = '<ul style="margin:0.5em 0 0 0;padding-inline-start:1.2em;">';
+                list.forEach(function (d) {
+                    var isErr = d.Severity === 'Error' || d.Severity === 0;
+                    html += '<li style="margin-bottom:0.4em;">' +
+                        icon(isErr ? 'error_outline' : 'warning_amber', '') +
+                        '<strong>' + esc(isErr ? 'Error' : 'Warning') + '</strong> ' + esc(d.Message) +
+                        (d.Path ? ' <code>' + esc(d.Path) + '</code>' : '') +
+                        '</li>';
+                });
+                return html + '</ul>';
+            }
+
+            function showDetail(fileName) {
+                var page = document.querySelector('#SmarterPlaylistConfigPage');
+                ApiClient.getJSON(ApiClient.getUrl('SmarterPlaylist/Definitions/' + encodeURIComponent(fileName))).then(function (d) {
+                    page.querySelector('#sp-detail-title').textContent = d.Summary.Name || fileName;
+                    var body = '';
+                    body += '<p class="fieldDescription">File: <code>' + esc(fileName) + '.json</code></p>';
+                    if (d.Diagnostics && d.Diagnostics.length) {
+                        body += '<h4>Problems</h4>' + renderDiagnostics(d.Diagnostics);
+                    } else {
+                        body += '<p>' + icon('check_circle_outline', '') + 'No problems found.</p>';
+                    }
+                    var r = d.Summary.LastRefresh;
+                    if (r && r.ErrorMessage) {
+                        body += '<h4>Last refresh</h4><p>' + icon('error_outline', '') + esc(r.ErrorMessage) + '</p>';
+                    }
+                    body += '<h4>Definition</h4><pre style="overflow-x:auto;padding:0.75em;border-radius:4px;background:rgba(127,127,127,0.12);">'
+                         + esc(d.RawJson) + '</pre>';
+                    page.querySelector('#sp-detail-body').innerHTML = body;
+                    page.querySelector('#sp-detail').classList.remove('hide');
+                    page.querySelector('#sp-detail-title').focus();
+                });
+            }
+
+            function load(page) {
+                Dashboard.showLoadingMsg();
+                page.querySelector('#sp-status').textContent = 'Loading playlists…';
+
+                ApiClient.getJSON(ApiClient.getUrl('SmarterPlaylist/Definitions')).then(function (data) {
+                    page.querySelector('#sp-basepath').innerHTML =
+                        'Definitions are read from <code>' + esc(data.BasePath) + '</code>';
+
+                    var rows = '';
+                    (data.Definitions || []).forEach(function (d) {
+                        rows += '<tr data-file="' + esc(d.FileName) + '" style="border-top:1px solid rgba(127,127,127,0.25);">' +
+                            '<td style="padding:0.6em 0.5em;"><button is="emby-button" type="button" class="raised sp-open" data-file="' + esc(d.FileName) + '" style="margin:0;">' +
+                                '<span>' + esc(d.Name || d.FileName) + '</span></button>' +
+                                '<div class="fieldDescription">' + esc(d.FileName) + '.json</div></td>' +
+                            '<td style="padding:0.6em 0.5em;">' + esc(d.User) + (d.UserExists ? '' : '<div class="fieldDescription">not on this server</div>') + '</td>' +
+                            '<td style="padding:0.6em 0.5em;">' + esc(d.RuleSummary) + '</td>' +
+                            '<td style="padding:0.6em 0.5em;">' + itemsCell(d) + '</td>' +
+                            '<td style="padding:0.6em 0.5em;">' + esc(relTime(d.LastRefresh ? d.LastRefresh.CompletedUtc : null)) + '</td>' +
+                            '<td style="padding:0.6em 0.5em;">' + statusCell(d) + '</td>' +
+                            '</tr>';
+                    });
+
+                    page.querySelector('#sp-rows').innerHTML = rows;
+                    page.querySelector('#sp-table-wrap').classList.toggle('hide', !(data.Definitions || []).length);
+                    page.querySelector('#sp-empty').classList.toggle('hide', (data.Definitions || []).length > 0);
+
+                    var le = data.LoadErrors || [];
+                    page.querySelector('#sp-loaderrors').classList.toggle('hide', !le.length);
+                    if (le.length) {
+                        page.querySelector('#sp-loaderrors-body').innerHTML = renderDiagnostics(le);
+                    }
+
+                    var broken = (data.Definitions || []).filter(function (d) {
+                        return (d.Diagnostics || []).some(function (x) { return x.Severity === 'Error' || x.Severity === 0; });
+                    }).length;
+                    page.querySelector('#sp-status').textContent =
+                        (data.Definitions || []).length + ' playlist definition(s) found' +
+                        (broken ? ', ' + broken + ' with problems' : '') +
+                        (le.length ? ', ' + le.length + ' unreadable file(s)' : '') + '.';
+
+                    Dashboard.hideLoadingMsg();
+                }, function () {
+                    page.querySelector('#sp-status').textContent = 'Could not load playlists. Check the Jellyfin log.';
+                    Dashboard.hideLoadingMsg();
+                });
+            }
+
+            document.querySelector('#SmarterPlaylistConfigPage').addEventListener('pageshow', function () {
+                var page = this;
+                load(page);
+
+                page.querySelector('#sp-reload').addEventListener('click', function () { load(page); });
+                page.querySelector('#sp-rows').addEventListener('click', function (e) {
+                    var btn = e.target.closest ? e.target.closest('.sp-open') : null;
+                    if (btn) { showDetail(btn.getAttribute('data-file')); }
+                });
+            });
+        })();
+    </script>
+</div>

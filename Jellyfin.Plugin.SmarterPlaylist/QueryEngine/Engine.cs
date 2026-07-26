@@ -42,9 +42,14 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
         private const double BareYearUpperBound = 9999;
 
         /// <summary>
-        /// Members held as Unix seconds, whose rule values may be written as readable dates.
+        /// Gets the members held as Unix seconds, whose rule values may be written as readable dates.
         /// </summary>
-        private static readonly string[] _dateMembers =
+        /// <remarks>
+        /// Public because the configuration page's schema must classify exactly these members as dates.
+        /// Exposing the engine's own list, rather than keeping a parallel copy elsewhere, means the two
+        /// cannot drift into disagreeing about which members accept a readable date.
+        /// </remarks>
+        public static IReadOnlyList<string> DateMembers { get; } =
         [
             nameof(Operand.PremiereDate),
             nameof(Operand.DateCreated),
@@ -128,7 +133,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
         /// <exception cref="ArgumentException">A date member's value is neither a date nor a Unix timestamp.</exception>
         private static string NormalizeTargetValue(Expression rule)
         {
-            if (Array.IndexOf(_dateMembers, rule.MemberName) < 0)
+            if (!DateMembers.Contains(rule.MemberName, StringComparer.Ordinal))
             {
                 return rule.TargetValue;
             }

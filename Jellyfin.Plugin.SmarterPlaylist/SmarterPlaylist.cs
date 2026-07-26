@@ -89,9 +89,10 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         /// <param name="userDataManager">User data manager used to resolve play state.</param>
         /// <param name="user">User the playlist is generated for.</param>
         /// <returns>
-        /// The ids of the matching items, sorted by <see cref="Order"/> and capped at <see cref="MaxItems"/>.
+        /// The ids of the matching items, sorted by <see cref="Order"/> and capped at
+        /// <see cref="MaxItems"/>, together with how many matched before the cap.
         /// </returns>
-        public IEnumerable<Guid> FilterPlaylistItems(
+        public FilterResult FilterPlaylistItems(
             IEnumerable<BaseItem> items,
             ILibraryManager libraryManager,
             IUserDataManager userDataManager,
@@ -111,7 +112,9 @@ namespace Jellyfin.Plugin.SmarterPlaylist
                 }
             }
 
-            return Order.OrderBy(results).Take(MaxItems).Select(x => x.Id);
+            var ids = Order.OrderBy(results).Take(MaxItems).Select(x => x.Id).ToList();
+
+            return new FilterResult(ids, results.Count);
         }
 
         /// <summary>
