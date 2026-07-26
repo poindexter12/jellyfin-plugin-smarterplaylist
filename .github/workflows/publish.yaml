@@ -76,9 +76,18 @@ jobs:
         run: |-
           set -euo pipefail
           dotnet build --configuration Release --no-incremental
-          cd Jellyfin.Plugin.SmarterPlaylist/bin/Release/net9.0
-          zip -j "${GITHUB_WORKSPACE}/${ZIP}" Jellyfin.Plugin.SmarterPlaylist.dll
-          cd "${GITHUB_WORKSPACE}"
+
+          # Zip from the workspace root with -j so the DLL lands at the archive root. Doing this via
+          # cd plus an absolute archive path made zip write the archive somewhere else entirely, and
+          # the failure only surfaced two steps later as an empty checksum.
+          DLL="Jellyfin.Plugin.SmarterPlaylist/bin/Release/net9.0/Jellyfin.Plugin.SmarterPlaylist.dll"
+          test -f "${DLL}" || { echo "::error::Built DLL not found at ${DLL}"; exit 1; }
+
+          rm -f "${ZIP}"
+          zip -j "${ZIP}" "${DLL}"
+          test -f "${ZIP}" || { echo "::error::Archive ${ZIP} was not created"; exit 1; }
+
+          unzip -l "${ZIP}"
           echo "CHECKSUM=$(md5sum "${ZIP}" | cut -d' ' -f1)" >> "$GITHUB_ENV"
 
       - name: Attach artifact to the release
