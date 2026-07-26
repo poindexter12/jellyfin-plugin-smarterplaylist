@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -6,61 +6,116 @@ using System.Threading.Tasks;
 
 namespace Jellyfin.Plugin.SmarterPlaylist
 {
-    public interface ISmarterPlaylistStore
-    {
-        Task<SmarterPlaylistDto> GetSmarterPlaylistAsync(Guid SmarterPlaylistId);
-        Task<SmarterPlaylistDto[]> LoadPlaylistsAsync(Guid userId);
-        Task<SmarterPlaylistDto[]> GetAllSmarterPlaylistsAsync();
-        Task SaveAsync(SmarterPlaylistDto SmarterPlaylist);
-        void Delete(Guid userId, string SmarterPlaylistId);
-    }
-
+    /// <summary>
+    /// Stores playlist definitions as JSON files on disk.
+    /// </summary>
+    /// <param name="fileSystem">Resolves the paths definitions are read from and written to.</param>
     public class SmarterPlaylistStore(ISmarterPlaylistFileSystem fileSystem) : ISmarterPlaylistStore
     {
+        /// <summary>
+        /// Definitions are hand-authored, so they are written back in a readable shape rather than
+        /// minified. Without this, stamping in the generated Id reflows the user's own file to a
+        /// single line.
+        /// </summary>
+        private static readonly JsonSerializerOptions _writeOptions = new() { WriteIndented = true };
+
         private readonly ISmarterPlaylistFileSystem _fileSystem = fileSystem;
 
-        public async Task<SmarterPlaylistDto> GetSmarterPlaylistAsync(Guid SmarterPlaylistId)
+        /// <inheritdoc />
+        public async Task<SmarterPlaylistDto> GetSmarterPlaylistAsync(Guid smarterPlaylistId)
         {
-            var fileName = _fileSystem.GetSmarterPlaylistFilePath(SmarterPlaylistId.ToString());
+            var fileName = _fileSystem.GetSmarterPlaylistFilePath(smarterPlaylistId.ToString());
 
             return await LoadPlaylistAsync(fileName).ConfigureAwait(false);
         }
 
+        /// <inheritdoc />
         public async Task<SmarterPlaylistDto[]> LoadPlaylistsAsync(Guid userId)
         {
-            var deserializeTasks = _fileSystem.GetSmarterPlaylistFilePaths(userId.ToString()).Select(LoadPlaylistAsync).ToArray();
+            var paths = _fileSystem.GetSmarterPlaylistFilePaths(userId.ToString());
 
-            await Task.WhenAll(deserializeTasks).ConfigureAwait(false);
-
-            return deserializeTasks.Select(x => x.Result).ToArray();
+            return await Task.WhenAll(paths.Select(LoadPlaylistAsync)).ConfigureAwait(false);
         }
 
+        /// <inheritdoc />
         public async Task<SmarterPlaylistDto[]> GetAllSmarterPlaylistsAsync()
         {
-            var deserializeTasks = _fileSystem.GetAllSmarterPlaylistFilePaths().Select(LoadPlaylistAsync).ToArray();
+            var paths = _fileSystem.GetAllSmarterPlaylistFilePaths();
 
-            await Task.WhenAll(deserializeTasks).ConfigureAwait(false);
-
-            return [.. deserializeTasks.Select(x => x.Result)];
+            return await Task.WhenAll(paths.Select(LoadPlaylistAsync)).ConfigureAwait(false);
         }
 
-        public async Task SaveAsync(SmarterPlaylistDto SmarterPlaylist)
+        /// <inheritdoc />
+        /// <exception cref="ArgumentException"><paramref name="smarterPlaylist"/> has no id set.</exception>
+        public async Task SaveAsync(SmarterPlaylistDto smarterPlaylist)
         {
-            var filePath = _fileSystem.GetSmarterPlaylistPath(SmarterPlaylist.Id, SmarterPlaylist.FileName);
-            await using var writer = File.Create(filePath);
-            await JsonSerializer.SerializeAsync(writer, SmarterPlaylist).ConfigureAwait(false);
+            ArgumentNullException.ThrowIfNull(smarterPlaylist);
+
+            if (smarterPlaylist.Id is null)
+            {
+                throw new ArgumentException("Playlist Id must be set before saving", nameof(smarterPlaylist));
+            }
+
+            var filePath = _fileSystem.GetSmarterPlaylistPath(smarterPlaylist.Id, smarterPlaylist.FileName);
+            var writer = File.Create(filePath);
+
+            await using (writer.ConfigureAwait(false))
+            {
+                await JsonSerializer.SerializeAsync(writer, smarterPlaylist, _writeOptions).ConfigureAwait(false);
+            }
         }
 
-        public void Delete(Guid userId, string SmarterPlaylistId)
+        /// <inheritdoc />
+        public void Delete(Guid userId, string smarterPlaylistId)
         {
-            var filePath = _fileSystem.GetSmarterPlaylistPath(userId.ToString(), SmarterPlaylistId);
-            if (File.Exists(filePath)) File.Delete(filePath);
+            var filePath = _fileSystem.GetSmarterPlaylistPath(userId.ToString(), smarterPlaylistId);
+
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
         }
 
-        private async Task<SmarterPlaylistDto> LoadPlaylistAsync(string filePath)
+        /// <summary>
+        /// Deserializes a single definition file.
+        /// </summary>
+        /// <remarks>
+        /// The file's own name is authoritative for <see cref="SmarterPlaylistDto.FileName"/>. That field
+        /// is free text and can disagree with the name on disk; since <see cref="SaveAsync"/> writes to
+        /// the path the field names, a divergent value would fork one authored definition into two files,
+        /// both enumerated and both refreshing. Taking the name from disk keeps identity single-valued.
+        /// </remarks>
+        /// <param name="filePath">Full path of the file to read.</param>
+        /// <returns>The definition the file describes.</returns>
+        /// <exception cref="InvalidOperationException">The file is missing, malformed, or empty.</exception>
+        private static async Task<SmarterPlaylistDto> LoadPlaylistAsync(string filePath)
         {
-            await using var reader = File.OpenRead(filePath);
-            return await JsonSerializer.DeserializeAsync<SmarterPlaylistDto>(reader).ConfigureAwait(false);
+            SmarterPlaylistDto? dto;
+
+            try
+            {
+                var reader = File.OpenRead(filePath);
+
+                await using (reader.ConfigureAwait(false))
+                {
+                    dto = await JsonSerializer.DeserializeAsync<SmarterPlaylistDto>(reader).ConfigureAwait(false);
+                }
+            }
+            catch (JsonException ex)
+            {
+                // The raw exception names only a byte offset, which is useless when the task is
+                // iterating an unknown number of files.
+                throw new InvalidOperationException($"Smarter playlist file '{filePath}' is not valid JSON: {ex.Message}", ex);
+            }
+
+            if (dto is null)
+            {
+                throw new InvalidOperationException($"Smarter playlist file '{filePath}' is empty");
+            }
+
+            dto.FileName = Path.GetFileNameWithoutExtension(filePath);
+
+            return dto;
         }
     }
 }
