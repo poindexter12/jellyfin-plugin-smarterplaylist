@@ -1,5 +1,10 @@
-<div id="SmarterPlaylistConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
-     data-controller="__plugin/smarterplaylist">
+<!-- No data-controller. jellyfin-web treats that attribute as "import a JS module from
+     /web/configurationpage?name=<value>" and chains the whole page activation off that import
+     (viewContainer.js, setControllerClass -> loadView). This plugin registers one page resource,
+     the HTML, and keeps its logic in the inline script below, so the import 404s, the promise
+     rejects, and pageshow is never dispatched -- leaving the markup on screen with none of its
+     script ever running. Add this attribute back only alongside a real JS resource in GetPages. -->
+<div id="SmarterPlaylistConfigPage" data-role="page" class="page type-interior pluginConfigurationPage">
     <div data-role="content">
         <div class="content-primary">
 
@@ -707,6 +712,11 @@
                 });
             }
 
+            // pageshow fires on every visit to the page, not just the first. The listeners below must
+            // be attached once: bound a second time, one click on Save sends two writes and one click
+            // on a row opens the editor twice.
+            var listenersAttached = false;
+
             document.querySelector('#SmarterPlaylistConfigPage').addEventListener('pageshow', function () {
                 var page = this;
 
@@ -728,6 +738,9 @@
                 });
 
                 load(page);
+
+                if (listenersAttached) { return; }
+                listenersAttached = true;
 
                 page.querySelector('#sp-reload').addEventListener('click', function () { load(page); });
                 page.querySelector('#sp-new').addEventListener('click', function () { startCreate(); });
