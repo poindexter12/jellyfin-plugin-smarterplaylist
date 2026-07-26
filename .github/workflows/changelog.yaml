@@ -67,9 +67,18 @@ jobs:
           fi
           rm cl.md
 
-          # Track the current Jellyfin stable ABI so a release never claims an older target.
-          ABI="$(curl -sSf https://api.jellyfin.org/openapi/jellyfin-openapi-stable.json | jq -r '.info.version').0"
-          echo "ABI_VERSION=${ABI}" >> "$GITHUB_ENV"
+          # targetAbi must describe what the plugin was COMPILED against, not the newest server in
+          # existence. The upstream workflow reads api.jellyfin.org's current stable version, which is
+          # only correct if the package references are bumped in the same commit -- otherwise a release
+          # built against 10.11 declares it needs 12.0, and every server that can actually run it
+          # filters it out of the catalogue as too new.
+          CONTROLLER="$(grep -oE 'Include="Jellyfin\.Controller" Version="[0-9.]+"' Jellyfin.Plugin.SmarterPlaylist/Jellyfin.Plugin.SmarterPlaylist.csproj | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+          if [[ -z "${CONTROLLER}" ]]; then
+            echo "::error::Could not read the Jellyfin.Controller version from the csproj."
+            exit 1
+          fi
+          IFS=. read -r ABI_MAJOR ABI_MINOR _ <<< "${CONTROLLER}"
+          echo "ABI_VERSION=${ABI_MAJOR}.${ABI_MINOR}.0.0" >> "$GITHUB_ENV"
 
       - name: Checkout Repository
         if: ${{ env.HAS_CHANGES == 'true' }}
