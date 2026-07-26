@@ -15,14 +15,6 @@
                 "sourceUrl": "https://github.com/poindexter12/jellyfin-plugin-smarterplaylist/releases/download/v2.1.0/smarterplaylist_2.1.0.zip",
                 "checksum": "9347cd227e05adc1084cd594afd48e55",
                 "timestamp": "2026-07-26T02:10:01Z"
-            },
-            {
-                "version": "2.0.0.0",
-                "changelog": "Jellyfin 10.11 support. Fixes person filters never matching, regex on list properties being inverted, MaxItems being ignored, date rules corrupting their own definition file, and a definition forking into two when FileName diverged from the file on disk.",
-                "targetAbi": "10.11.0.0",
-                "sourceUrl": "https://github.com/poindexter12/jellyfin-plugin-smarterplaylist/releases/download/v2.0.0.0/smarterplaylist_2.0.0.0.zip",
-                "checksum": "0c87459b6b4cc780ae604ade5f4e0de7",
-                "timestamp": "2026-07-26T01:32:29Z"
             }
         ]
     }
