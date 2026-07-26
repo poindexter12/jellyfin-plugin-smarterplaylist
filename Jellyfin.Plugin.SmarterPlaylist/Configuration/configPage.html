@@ -69,6 +69,46 @@
                         </div>
                     </div>
 
+                    <div class="verticalSection" role="tablist" aria-label="Definition editor">
+                        <button is="emby-button" type="button" id="sp-tab-rules" class="raised button-submit"
+                                role="tab" aria-selected="true" aria-controls="sp-pane-rules"><span>Rules</span></button>
+                        <button is="emby-button" type="button" id="sp-tab-json" class="raised"
+                                role="tab" aria-selected="false" aria-controls="sp-pane-json"><span>Advanced (JSON)</span></button>
+                    </div>
+
+                    <div id="sp-pane-rules" role="tabpanel" aria-labelledby="sp-tab-rules">
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="spName">Playlist name</label>
+                            <input is="emby-input" type="text" id="spName" autocomplete="off" />
+                        </div>
+
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="spUser">User</label>
+                            <select is="emby-select" id="spUser"></select>
+                            <div class="fieldDescription">
+                                The playlist is built from this user&rsquo;s library and play state.
+                            </div>
+                        </div>
+
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="spMaxItems">Maximum items</label>
+                            <input is="emby-input" type="number" id="spMaxItems" min="0" step="1" />
+                            <div class="fieldDescription">Applied after sorting. 0 uses the default.</div>
+                        </div>
+
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="spOrder">Sort order</label>
+                            <select is="emby-select" id="spOrder"></select>
+                        </div>
+
+                        <div id="sp-groups"></div>
+
+                        <button is="emby-button" type="button" id="sp-add-group" class="raised">
+                            <span>+ Add another rule group (matches if this OR any other group matches)</span>
+                        </button>
+                    </div>
+
+                    <div id="sp-pane-json" class="hide" role="tabpanel" aria-labelledby="sp-tab-json">
                     <label class="inputLabel inputLabelUnfocused" for="spDefinitionJson">Definition JSON</label>
                     <textarea id="spDefinitionJson" class="textarea-mono"
                               spellcheck="false" autocapitalize="off" autocorrect="off" wrap="off"
@@ -77,6 +117,7 @@
                     <div class="fieldDescription" id="sp-json-help">
                         Edits are validated against the plugin&rsquo;s rule engine before they are saved.
                         Property names and operators are case-sensitive.
+                    </div>
                     </div>
 
                     <p id="sp-validation" role="status" class="fieldDescription"></p>
@@ -167,6 +208,208 @@
                 return html + '</ul>';
             }
 
+            // ---- Rule builder -------------------------------------------------------------
+            // The JSON textarea stays the single source of truth. The builder parses it, renders
+            // controls, and writes back on every change. Keeping one model avoids the two halves
+            // of the editor drifting apart, and means Save/validation need no special casing.
+            var schema = null;
+            var users = [];
+
+            function memberByName(name) {
+                for (var i = 0; i < schema.Members.length; i++) {
+                    if (schema.Members[i].Name === name) { return schema.Members[i]; }
+                }
+                return null;
+            }
+
+            function options(list, selected) {
+                var html = '';
+                list.forEach(function (v) {
+                    html += '<option value="' + esc(v) + '"' + (v === selected ? ' selected' : '') + '>' + esc(v) + '</option>';
+                });
+                return html;
+            }
+
+            function valueControl(member, rule, gi, ri) {
+                var id = 'sp-val-' + gi + '-' + ri;
+                var common = ' data-g="' + gi + '" data-r="' + ri + '" data-f="value" id="' + id + '" ';
+                if (!member) { return '<input is="emby-input" type="text"' + common + 'value="' + esc(rule.TargetValue) + '" />'; }
+
+                if (member.Kind === 'Boolean') {
+                    return '<select is="emby-select"' + common + '>' + options(['True', 'False'], rule.TargetValue) + '</select>';
+                }
+                if (member.Kind === 'TextEnum') {
+                    return '<select is="emby-select"' + common + '>' + options(schema.MediaTypes, rule.TargetValue) + '</select>';
+                }
+                if (member.Kind === 'Date') {
+                    // type=date yields YYYY-MM-DD, which the engine normalises for compilation while
+                    // leaving the stored value readable.
+                    var d = /^\d{4}-\d{2}-\d{2}$/.test(rule.TargetValue) ? rule.TargetValue : '';
+                    return '<input is="emby-input" type="date"' + common + 'value="' + esc(d) + '" />';
+                }
+                if (member.Kind === 'Number') {
+                    var attrs = '';
+                    if (member.Minimum !== null && member.Minimum !== undefined) { attrs += ' min="' + member.Minimum + '"'; }
+                    if (member.Maximum !== null && member.Maximum !== undefined) { attrs += ' max="' + member.Maximum + '"'; }
+                    if (member.Step !== null && member.Step !== undefined) { attrs += ' step="' + member.Step + '"'; }
+                    return '<input is="emby-input" type="number"' + common + attrs + ' value="' + esc(rule.TargetValue) + '" />';
+                }
+                return '<input is="emby-input" type="text"' + common + 'value="' + esc(rule.TargetValue) + '" />';
+            }
+
+            function renderGroups(dto) {
+                var names = schema.Members
+                    .filter(function (m) { return m.Kind !== 'Unsupported'; })
+                    .map(function (m) { return m.Name; });
+                var html = '';
+                var multi = dto.ExpressionSets.length > 1;
+
+                dto.ExpressionSets.forEach(function (set, gi) {
+                    if (gi > 0) {
+                        html += '<p class="fieldDescription" style="margin:0.75em 0;font-weight:700;">OR</p>';
+                    }
+                    html += '<div class="verticalSection" style="' +
+                        (multi ? 'border:1px solid rgba(127,127,127,0.3);border-radius:4px;padding:0.75em;' : '') + '">';
+                    html += '<p class="fieldDescription">Match <strong>ALL</strong> of these rules:</p>';
+
+                    set.Expressions.forEach(function (rule, ri) {
+                        var member = memberByName(rule.MemberName);
+                        html += '<div style="display:flex;flex-wrap:wrap;gap:0.5em;align-items:flex-end;margin-bottom:0.5em;">';
+                        html += '<div class="selectContainer" style="flex:1 1 12em;margin:0;">' +
+                            '<label class="selectLabel" for="sp-mem-' + gi + '-' + ri + '">Property</label>' +
+                            '<select is="emby-select" id="sp-mem-' + gi + '-' + ri + '" data-g="' + gi + '" data-r="' + ri + '" data-f="member">' +
+                            options(names, rule.MemberName) + '</select></div>';
+                        html += '<div class="selectContainer" style="flex:1 1 10em;margin:0;">' +
+                            '<label class="selectLabel" for="sp-op-' + gi + '-' + ri + '">Operator</label>' +
+                            '<select is="emby-select" id="sp-op-' + gi + '-' + ri + '" data-g="' + gi + '" data-r="' + ri + '" data-f="op">' +
+                            (member ? options(member.Operators, rule.Operator) : '') + '</select></div>';
+                        html += '<div class="inputContainer" style="flex:2 1 14em;margin:0;">' +
+                            '<label class="inputLabel inputLabelUnfocused" for="sp-val-' + gi + '-' + ri + '">Value</label>' +
+                            valueControl(member, rule, gi, ri) + '</div>';
+                        html += '<button is="emby-button" type="button" class="raised sp-del-rule" ' +
+                            'data-g="' + gi + '" data-r="' + ri + '" title="Remove this rule"><span>Remove</span></button>';
+                        html += '</div>';
+                        if (member && member.Notes) {
+                            html += '<div class="fieldDescription" style="margin:-0.25em 0 0.75em 0;">' + esc(member.Notes) + '</div>';
+                        }
+                    });
+
+                    html += '<button is="emby-button" type="button" class="raised sp-add-rule" data-g="' + gi + '"><span>+ Add rule</span></button>';
+                    if (multi) {
+                        html += ' <button is="emby-button" type="button" class="raised sp-del-group" data-g="' + gi + '"><span>Remove group</span></button>';
+                    }
+                    html += '</div>';
+                });
+
+                document.querySelector('#sp-groups').innerHTML = html;
+            }
+
+            function currentDto() {
+                try { return JSON.parse(document.querySelector('#spDefinitionJson').value); }
+                catch (e) { return null; }
+            }
+
+            function writeDto(dto) {
+                document.querySelector('#spDefinitionJson').value = JSON.stringify(dto, null, 4);
+                scheduleValidation();
+            }
+
+            function renderBuilder() {
+                var page = document.querySelector('#SmarterPlaylistConfigPage');
+                var dto = currentDto();
+                var unavailable = page.querySelector('#sp-builder-unavailable');
+                if (!dto) {
+                    // Invalid JSON cannot be represented as controls. Say so rather than silently
+                    // showing an empty builder that would overwrite the user's text on first edit.
+                    page.querySelector('#sp-groups').innerHTML =
+                        '<p class="fieldDescription">' + icon('error_outline', '') +
+                        'This definition is not valid JSON, so it cannot be shown as rules. Fix it on the Advanced tab.</p>';
+                    return;
+                }
+                if (!dto.ExpressionSets || !dto.ExpressionSets.length) {
+                    dto.ExpressionSets = [ { Expressions: [] } ];
+                }
+                page.querySelector('#spName').value = dto.Name || '';
+                page.querySelector('#spMaxItems').value = (dto.MaxItems === undefined || dto.MaxItems === null) ? 0 : dto.MaxItems;
+                page.querySelector('#spUser').innerHTML =
+                    '<option value="">(choose a user)</option>' + options(users, dto.User || '');
+                page.querySelector('#spUser').value = dto.User || '';
+                page.querySelector('#spOrder').innerHTML = options(schema.Orders, (dto.Order && dto.Order.Name) || 'NoOrder');
+                renderGroups(dto);
+            }
+
+            function onBuilderChange(e) {
+                var t = e.target;
+                var dto = currentDto();
+                if (!dto) { return; }
+
+                if (t.id === 'spName') { dto.Name = t.value; writeDto(dto); return; }
+                if (t.id === 'spUser') { dto.User = t.value; writeDto(dto); return; }
+                if (t.id === 'spOrder') { dto.Order = { Name: t.value }; writeDto(dto); return; }
+                if (t.id === 'spMaxItems') { dto.MaxItems = parseInt(t.value, 10) || 0; writeDto(dto); return; }
+
+                var g = t.getAttribute && t.getAttribute('data-g');
+                var r = t.getAttribute && t.getAttribute('data-r');
+                var f = t.getAttribute && t.getAttribute('data-f');
+                if (g === null || g === undefined || !f) { return; }
+
+                var rule = dto.ExpressionSets[+g].Expressions[+r];
+                if (f === 'member') {
+                    rule.MemberName = t.value;
+                    var member = memberByName(t.value);
+                    // Never silently coerce an operator that is not valid for the new property.
+                    if (member && member.Operators.indexOf(rule.Operator) === -1) {
+                        rule.Operator = '';
+                        rule.TargetValue = '';
+                    }
+                    writeDto(dto);
+                    renderBuilder();
+                    var sel = document.querySelector('#sp-op-' + g + '-' + r);
+                    if (sel && !rule.Operator) { sel.focus(); }
+                    return;
+                }
+                if (f === 'op') { rule.Operator = t.value; writeDto(dto); return; }
+                if (f === 'value') {
+                    // Numbers must serialise with an invariant decimal point; a locale comma throws
+                    // server-side in Convert.ChangeType.
+                    rule.TargetValue = String(t.value);
+                    writeDto(dto);
+                    return;
+                }
+            }
+
+            function onBuilderClick(e) {
+                var btn = e.target.closest ? e.target.closest('button') : null;
+                if (!btn) { return; }
+                var dto = currentDto();
+                if (!dto) { return; }
+                var g = btn.getAttribute('data-g');
+
+                if (btn.classList.contains('sp-add-rule')) {
+                    dto.ExpressionSets[+g].Expressions.push({ MemberName: 'Name', Operator: 'Contains', TargetValue: '' });
+                } else if (btn.classList.contains('sp-del-rule')) {
+                    dto.ExpressionSets[+g].Expressions.splice(+btn.getAttribute('data-r'), 1);
+                } else if (btn.classList.contains('sp-del-group')) {
+                    dto.ExpressionSets.splice(+g, 1);
+                } else if (btn.id === 'sp-add-group') {
+                    dto.ExpressionSets.push({ Expressions: [ { MemberName: 'Name', Operator: 'Contains', TargetValue: '' } ] });
+                } else {
+                    return;
+                }
+                writeDto(dto);
+                renderBuilder();
+            }
+
+            function showTab(which) {
+                var page = document.querySelector('#SmarterPlaylistConfigPage');
+                var rules = which === 'rules';
+                page.querySelector('#sp-pane-rules').classList.toggle('hide', !rules);
+                page.querySelector('#sp-pane-json').classList.toggle('hide', rules);
+                page.querySelector('#sp-tab-rules').setAttribute('aria-selected', rules ? 'true' : 'false');
+                page.querySelector('#sp-tab-json').setAttribute('aria-selected', rules ? 'false' : 'true');
+                if (rules) { renderBuilder(); }
+            }
+
             // Editor state. mode is 'edit' or 'create'.
             var editor = { mode: null, fileName: null, sourceHash: null, original: '', timer: null };
 
@@ -218,6 +461,7 @@
                 page.querySelector('#sp-detail').classList.remove('hide');
                 page.querySelector('#sp-newname-wrap').style.display = (mode === 'create') ? '' : 'none';
                 page.querySelector('#sp-revert').classList.toggle('hide', mode === 'create');
+                showTab('rules');
             }
 
             function showDetail(fileName) {
@@ -403,6 +647,19 @@
 
             document.querySelector('#SmarterPlaylistConfigPage').addEventListener('pageshow', function () {
                 var page = this;
+
+                // The builder cannot render without the schema, and the user list turns the single
+                // most common failure -- naming a user that does not exist -- into an impossible one.
+                Promise.all([
+                    ApiClient.getJSON(ApiClient.getUrl('SmarterPlaylist/Schema')),
+                    ApiClient.getUsers()
+                ]).then(function (res) {
+                    schema = res[0];
+                    users = (res[1] || []).map(function (u) { return u.Name; });
+                }, function () {
+                    setValidation('Could not load the rule schema. The Advanced tab still works.');
+                });
+
                 load(page);
 
                 page.querySelector('#sp-reload').addEventListener('click', function () { load(page); });
@@ -420,6 +677,12 @@
                 });
                 // Tab must move focus. Trapping it in a textarea is a keyboard trap; indentation is
                 // the author's problem.
+
+                page.querySelector('#sp-tab-rules').addEventListener('click', function () { showTab('rules'); });
+                page.querySelector('#sp-tab-json').addEventListener('click', function () { showTab('json'); });
+                page.querySelector('#sp-pane-rules').addEventListener('change', onBuilderChange);
+                page.querySelector('#sp-pane-rules').addEventListener('click', onBuilderClick);
+                page.querySelector('#sp-add-group').addEventListener('click', onBuilderClick);
 
                 page.querySelector('#sp-save').addEventListener('click', function () { save(page); });
                 page.querySelector('#sp-cancel').addEventListener('click', function () {

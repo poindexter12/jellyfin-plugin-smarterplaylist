@@ -70,7 +70,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
 
             if (type == typeof(string) && name == nameof(Operand.MediaType))
             {
-                return new MemberDescriptor(name, Describe(type), MemberKind.TextEnum, StringOperators(), false, "One of the media types Jellyfin defines.");
+                return new MemberDescriptor(name, Describe(type), MemberKind.TextEnum, ["Equal", "NotEqual", "Equals"], false, "One of the media types Jellyfin defines.");
             }
 
             if (type == typeof(string))
@@ -91,7 +91,34 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
 
             if (Array.IndexOf(_numericTypes, underlying) >= 0)
             {
-                return new MemberDescriptor(name, Describe(type), MemberKind.Number, ComparisonOperators(), false, null);
+                // Ranges cannot be reflected, so they are curated here rather than in the page, keeping
+                // every fact about a member in one place. CommunityRating is the 0-10 user score;
+                // CriticRating is a 0-100 percentage -- sharing one 0-10 control would make every
+                // realistic critic-rating rule unenterable.
+                return name switch
+                {
+                    nameof(Operand.CommunityRating) => new MemberDescriptor(
+                        name,
+                        Describe(type),
+                        MemberKind.Number,
+                        ComparisonOperators(),
+                        false,
+                        "The community score, from 0 to 10.",
+                        0,
+                        10,
+                        0.1),
+                    nameof(Operand.CriticRating) => new MemberDescriptor(
+                        name,
+                        Describe(type),
+                        MemberKind.Number,
+                        ComparisonOperators(),
+                        false,
+                        "Critic ratings are a percentage from 0 to 100.",
+                        0,
+                        100,
+                        1),
+                    _ => new MemberDescriptor(name, Describe(type), MemberKind.Number, ComparisonOperators(), false, null)
+                };
             }
 
             // Terminal fallback. A member landing here renders as unsupported rather than silently
