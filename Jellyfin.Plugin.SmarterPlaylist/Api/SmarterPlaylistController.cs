@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Entities;
+using Jellyfin.Plugin.SmarterPlaylist.QueryEngine;
 using MediaBrowser.Common.Api;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -236,10 +237,16 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
             var query = new InternalItemsQuery(user) { IncludeItemTypes = _supportedItems, Recursive = true };
-            var candidates = _libraryManager.GetItemsResult(query).Items;
+            var items = _libraryManager.GetItemsResult(query).Items;
 
+            // Flatten first, reading only what this definition's rules ask for. A preview of a rule
+            // about genres does no per-item credit or play-state lookup at all, which is the whole
+            // difference between a preview that returns promptly and one that walks the library twice.
             var playlist = new SmarterPlaylist(inspection.Dto);
-            var filtered = playlist.FilterPlaylistItems(candidates, _libraryManager, _userDataManager, user);
+            var candidates = OperandFactory.Project(
+                _libraryManager, _userDataManager, items, user, playlist.ReferencedMembers);
+
+            var filtered = playlist.FilterPlaylistItems(candidates);
 
             // Resolve a handful of titles in playlist order so the rules can be sanity-checked, not
             // just counted. Kept small deliberately: this runs on every preview.

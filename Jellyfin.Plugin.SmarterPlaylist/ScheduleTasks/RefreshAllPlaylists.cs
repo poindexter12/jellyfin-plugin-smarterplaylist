@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Entities;
+using Jellyfin.Plugin.SmarterPlaylist.QueryEngine;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -107,10 +108,16 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
         {
             var dtos = await _plStore.GetAllSmarterPlaylistsAsync().ConfigureAwait(false);
 
-            // Every definition used to re-read the whole library for itself, so ten playlists for one
-            // user meant ten full library enumerations per run. The candidate set depends only on the
-            // user, so it is read once per user and shared by that user's definitions.
-            var mediaByUser = new Dictionary<Guid, IReadOnlyList<BaseItem>>();
+            // Every definition used to read the whole library and project every item for itself, so
+            // ten playlists for one user meant ten enumerations and ten projections per run. Neither
+            // depends on the definition, only on the user, so both happen once per user and the
+            // result is shared.
+            var candidatesByUser = new Dictionary<Guid, IReadOnlyList<PlaylistCandidate>>();
+
+            // Which lookups a projection has to perform is the union across that user's definitions:
+            // if any one of them filters on a person, credits are fetched once for the run rather
+            // than once per definition that asks.
+            var neededByUser = NeededMembersByUser(dtos);
 
             for (var i = 0; i < dtos.Length; i++)
             {
@@ -130,7 +137,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
                 // playlist failure or swallowed.
                 try
                 {
-                    var status = await RefreshPlaylistAsync(dto, startedUtc, mediaByUser).ConfigureAwait(false);
+                    var status = await RefreshPlaylistAsync(dto, startedUtc, candidatesByUser, neededByUser).ConfigureAwait(false);
                     _statusStore.Record(status);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -156,12 +163,14 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
         /// </summary>
         /// <param name="dto">Definition of the playlist to regenerate.</param>
         /// <param name="startedUtc">When this definition's refresh began.</param>
-        /// <param name="mediaByUser">Candidate items already read for a user during this run.</param>
+        /// <param name="candidatesByUser">Candidates already projected for a user during this run.</param>
+        /// <param name="neededByUser">Members every definition for a user reads, keyed by user name.</param>
         /// <returns>The outcome, for the caller to record.</returns>
         private async Task<RefreshStatus> RefreshPlaylistAsync(
             SmarterPlaylistDto dto,
             DateTime startedUtc,
-            Dictionary<Guid, IReadOnlyList<BaseItem>> mediaByUser)
+            Dictionary<Guid, IReadOnlyList<PlaylistCandidate>> candidatesByUser,
+            Dictionary<string, IReadOnlySet<string>> neededByUser)
         {
             var smarterPlaylist = new SmarterPlaylist(dto);
 
@@ -205,14 +214,22 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
                     "The playlist could not be found in Jellyfin after being created.");
             }
 
-            if (!mediaByUser.TryGetValue(user.Id, out var candidates))
+            if (!candidatesByUser.TryGetValue(user.Id, out var candidates))
             {
-                candidates = GetAllUserMedia(user);
-                mediaByUser[user.Id] = candidates;
+                var needed = neededByUser.TryGetValue(dto.User ?? string.Empty, out var members)
+                    ? members
+                    : smarterPlaylist.ReferencedMembers;
+
+                // The library items go out of scope here: everything downstream reads the flattened
+                // candidates, so a whole library of Jellyfin entities is not held for the run.
+                candidates = OperandFactory.Project(
+                    _libraryManager, _userDataManager, GetAllUserMedia(user), user, needed);
+
+                candidatesByUser[user.Id] = candidates;
             }
 
             var playlist = matches[0];
-            var filtered = smarterPlaylist.FilterPlaylistItems(candidates, _libraryManager, _userDataManager, user);
+            var filtered = smarterPlaylist.FilterPlaylistItems(candidates);
 
             var query = new InternalItemsQuery(user)
             {
@@ -287,6 +304,34 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
             var result = await _playlistManager.CreatePlaylist(request).ConfigureAwait(false);
 
             return result.Id;
+        }
+
+        /// <summary>
+        /// Collects, per user, every member any of their definitions filters on.
+        /// </summary>
+        /// <param name="dtos">Every definition on disk.</param>
+        /// <returns>The union of referenced members, keyed by the user name a definition names.</returns>
+        private static Dictionary<string, IReadOnlySet<string>> NeededMembersByUser(
+            IEnumerable<SmarterPlaylistDto> dtos)
+        {
+            var needed = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
+
+            foreach (var dto in dtos)
+            {
+                var key = dto.User ?? string.Empty;
+                if (!needed.TryGetValue(key, out var members))
+                {
+                    members = new HashSet<string>(StringComparer.Ordinal);
+                    needed[key] = members;
+                }
+
+                foreach (var name in dto.ExpressionSets.SelectMany(s => s.Expressions).Select(e => e.MemberName))
+                {
+                    ((HashSet<string>)members).Add(name);
+                }
+            }
+
+            return needed;
         }
 
         /// <summary>

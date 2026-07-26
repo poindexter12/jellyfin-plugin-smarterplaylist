@@ -228,11 +228,10 @@ Every item below was verified against the code in this repository. Items marked 
 - Risk: Medium-high. This exact class already shipped one silent, total-failure bug of this kind.
 - Priority: Medium. Requires mocking `ILibraryManager` and `IUserDataManager`.
 
-**`MaxItems` enforcement:**
-- What's not tested: That `FilterPlaylistItems` actually caps the result. Only the DTO-to-model mapping of the value is asserted.
-- Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylist.cs`
-- Risk: Medium. The fix is one `.Take(MaxItems)` call, but a regression would silently produce oversized playlists — the same failure mode as the original bug.
-- Priority: Medium. Blocked on the same mocking work as the refresh pipeline. A tautological test that re-implements `Take` was deliberately **not** added, since it would assert the test's own logic rather than the code's.
+**`MaxItems` enforcement — CLOSED 2026-07-26:**
+- What's now tested: `FilterAndOrderTest` asserts the cap applies *after* sorting (so the first N in the chosen order survive), that `MaxItems: 0` falls back to the 1000 default, and that `MatchedCount`/`Truncated` still report the pre-cap total.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylist.cs`, `Jellyfin.Plugin.SmarterPlaylist.Tests/FilterAndOrderTest.cs`
+- Resolution: this was never really blocked on mocking. `FilterPlaylistItems` took Jellyfin entities plus the two managers needed to project them, which is what made it unreachable from a test. It now takes flattened `PlaylistCandidate` records, so selection, ordering and capping are all exercised directly with no doubles at all. Ordering was covered by the same change.
 
 **Documented operator matrix:**
 - What's now tested: Every row of the README's operator table is pinned by `EngineTest.cs` — collection `Contains` requiring whole elements, element-wise regex, binary equality on text, and `NotEqual` on booleans.

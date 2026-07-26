@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using MediaBrowser.Controller.Entities;
 
 namespace Jellyfin.Plugin.SmarterPlaylist
 {
@@ -18,7 +17,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         /// </summary>
         /// <param name="items">Items to sort.</param>
         /// <returns>The items in playlist order. The base implementation preserves the input order.</returns>
-        public virtual IEnumerable<BaseItem> OrderBy(IEnumerable<BaseItem> items)
+        public virtual IEnumerable<PlaylistCandidate> OrderBy(IEnumerable<PlaylistCandidate> items)
         {
             return items;
         }

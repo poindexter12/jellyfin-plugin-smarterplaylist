@@ -29,6 +29,43 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
         ];
 
         /// <summary>
+        /// Flattens a user's candidate items into the records a playlist is selected and sorted from.
+        /// </summary>
+        /// <remarks>
+        /// Done once per user per refresh, not once per definition, and the Jellyfin entities are
+        /// dropped as soon as it returns. <paramref name="needed"/> should be the union of the members
+        /// read by every definition for that user, so a lookup runs at most once per item per refresh
+        /// however many playlists ask for it.
+        /// </remarks>
+        /// <param name="libraryManager">Library manager used to resolve credits.</param>
+        /// <param name="userDataManager">User data manager used to resolve play state.</param>
+        /// <param name="items">Candidate items to flatten.</param>
+        /// <param name="user">User the items are being evaluated for.</param>
+        /// <param name="needed">Members the rules read, or <c>null</c> to fill everything.</param>
+        /// <returns>The flattened candidates, in the order the library returned them.</returns>
+        public static List<PlaylistCandidate> Project(
+            ILibraryManager libraryManager,
+            IUserDataManager userDataManager,
+            IEnumerable<BaseItem> items,
+            User user,
+            IReadOnlySet<string>? needed = null)
+        {
+            ArgumentNullException.ThrowIfNull(items);
+
+            var candidates = new List<PlaylistCandidate>();
+
+            foreach (var item in items)
+            {
+                candidates.Add(new PlaylistCandidate(
+                    item.Id,
+                    item.PremiereDate,
+                    GetMediaType(libraryManager, userDataManager, item, user, needed)));
+            }
+
+            return candidates;
+        }
+
+        /// <summary>
         /// Builds the <see cref="Operand"/> for a library item as seen by a specific user.
         /// </summary>
         /// <remarks>

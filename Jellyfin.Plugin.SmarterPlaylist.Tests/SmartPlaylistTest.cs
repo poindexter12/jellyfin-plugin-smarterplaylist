@@ -105,8 +105,8 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             Assert.Equal(25, new SmarterPlaylist(dto).MaxItems);
         }
 
-        // MaxItems is applied by FilterPlaylistItems, which needs ILibraryManager/IUserDataManager
-        // doubles to exercise. Until those exist, only the mapping above is covered -- the cap
-        // itself is verified in CONCERNS.md as a known coverage gap, not asserted here.
+        // The cap itself, and ordering, are exercised in FilterAndOrderTest. That was impossible while
+        // FilterPlaylistItems took Jellyfin entities and the managers needed to project them; it takes
+        // flattened candidates now, so no doubles are needed.
     }
 }
