@@ -324,7 +324,17 @@
             function renderBuilder() {
                 var page = document.querySelector('#SmarterPlaylistConfigPage');
                 var dto = currentDto();
-                var unavailable = page.querySelector('#sp-builder-unavailable');
+
+                // Without the schema there are no dropdowns to draw. Say so and leave the JSON tab
+                // usable, rather than throwing partway through and leaving the editor blank.
+                if (!schema) {
+                    page.querySelector('#sp-groups').innerHTML =
+                        '<p class="fieldDescription">' + icon('error_outline', '') +
+                        'The rule vocabulary could not be loaded, so rules cannot be shown as dropdowns. ' +
+                        'Use the Advanced (JSON) tab.</p>';
+                    return;
+                }
+
                 if (!dto) {
                     // Invalid JSON cannot be represented as controls. Say so rather than silently
                     // showing an empty builder that would overwrite the user's text on first edit.
@@ -497,11 +507,14 @@
 
             function startCreate() {
                 var page = document.querySelector('#SmarterPlaylistConfigPage');
-                ApiClient.getJSON(ApiClient.getUrl('SmarterPlaylist/Schema')).then(function (schema) {
+                ApiClient.getJSON(ApiClient.getUrl('SmarterPlaylist/Schema')).then(function (loaded) {
+                    // Do not shadow the module-level schema variable: renderBuilder reads that one, and a
+                    // local of the same name left it null, throwing before anything was drawn.
+                    schema = schema || loaded;
                     var seed = {
                         Name: 'My playlist',
                         User: '',
-                        MaxItems: schema.DefaultMaxItems,
+                        MaxItems: loaded.DefaultMaxItems,
                         ExpressionSets: [ { Expressions: [ { MemberName: 'Genres', Operator: 'Contains', TargetValue: 'Comedy' } ] } ],
                         Order: { Name: 'NoOrder' }
                     };
@@ -699,14 +712,19 @@
 
                 // The builder cannot render without the schema, and the user list turns the single
                 // most common failure -- naming a user that does not exist -- into an impossible one.
-                Promise.all([
-                    ApiClient.getJSON(ApiClient.getUrl('SmarterPlaylist/Schema')),
-                    ApiClient.getUsers()
-                ]).then(function (res) {
-                    schema = res[0];
-                    users = (res[1] || []).map(function (u) { return u.Name; });
+                // Fetched independently on purpose. Combining them meant a failure in either -- and
+                // the user list is the more fragile of the two -- left the schema null, which broke
+                // every builder render including the New definition button.
+                ApiClient.getJSON(ApiClient.getUrl('SmarterPlaylist/Schema')).then(function (res) {
+                    schema = res;
                 }, function () {
-                    setValidation('Could not load the rule schema. The Advanced tab still works.');
+                    setValidation('Could not load the rule vocabulary. The Advanced (JSON) tab still works.');
+                });
+
+                Promise.resolve(ApiClient.getUsers()).then(function (res) {
+                    users = (res || []).map(function (u) { return u.Name; });
+                }, function () {
+                    users = [];
                 });
 
                 load(page);
