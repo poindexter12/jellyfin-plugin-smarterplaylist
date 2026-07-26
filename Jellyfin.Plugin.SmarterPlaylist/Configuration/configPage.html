@@ -15,6 +15,9 @@
             </div>
 
             <div class="verticalSection">
+                <button is="emby-button" type="button" id="sp-new" class="raised button-submit">
+                    <span>New definition</span>
+                </button>
                 <button is="emby-button" type="button" id="sp-reload" class="raised">
                     <span>Reload</span>
                 </button>
@@ -55,6 +58,42 @@
             <div id="sp-detail" class="verticalSection hide">
                 <h3 class="sectionTitle" id="sp-detail-title" tabindex="-1"></h3>
                 <div id="sp-detail-body"></div>
+
+                <div id="sp-editor" class="hide">
+                    <div class="inputContainer" id="sp-newname-wrap" style="display:none;">
+                        <label class="inputLabel" for="spNewFileName">File name</label>
+                        <input is="emby-input" type="text" id="spNewFileName" autocomplete="off" />
+                        <div class="fieldDescription">
+                            Letters, numbers, dots, dashes and underscores. This becomes the file name and
+                            the playlist's identity; it cannot be changed later.
+                        </div>
+                    </div>
+
+                    <label class="inputLabel inputLabelUnfocused" for="spDefinitionJson">Definition JSON</label>
+                    <textarea id="spDefinitionJson" class="textarea-mono"
+                              spellcheck="false" autocapitalize="off" autocorrect="off" wrap="off"
+                              aria-describedby="sp-json-help"
+                              style="width:100%;min-height:24em;resize:vertical;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.95em;line-height:1.45;padding:0.6em;"></textarea>
+                    <div class="fieldDescription" id="sp-json-help">
+                        Edits are validated against the plugin&rsquo;s rule engine before they are saved.
+                        Property names and operators are case-sensitive.
+                    </div>
+
+                    <p id="sp-validation" role="status" class="fieldDescription"></p>
+                    <div id="sp-editor-problems"></div>
+
+                    <div class="verticalSection">
+                        <button is="emby-button" type="button" id="sp-save" class="raised button-submit">
+                            <span>Save</span>
+                        </button>
+                        <button is="emby-button" type="button" id="sp-revert" class="raised">
+                            <span>Revert</span>
+                        </button>
+                        <button is="emby-button" type="button" id="sp-cancel" class="raised">
+                            <span>Close</span>
+                        </button>
+                    </div>
+                </div>
             </div>
 
         </div>
@@ -128,27 +167,191 @@
                 return html + '</ul>';
             }
 
+            // Editor state. mode is 'edit' or 'create'.
+            var editor = { mode: null, fileName: null, sourceHash: null, original: '', timer: null };
+
+            function setValidation(text) {
+                document.querySelector('#sp-validation').textContent = text;
+            }
+
+            function summariseDiagnostics(list) {
+                var errs = 0, warns = 0;
+                (list || []).forEach(function (d) {
+                    if (d.Severity === 'Error' || d.Severity === 0) { errs++; } else { warns++; }
+                });
+                if (!errs && !warns) { return 'Valid'; }
+                var parts = [];
+                if (errs) { parts.push(errs + ' error' + (errs === 1 ? '' : 's')); }
+                if (warns) { parts.push(warns + ' warning' + (warns === 1 ? '' : 's')); }
+                return parts.join(', ');
+            }
+
+            function runValidation() {
+                var json = document.querySelector('#spDefinitionJson').value;
+                return ApiClient.ajax({
+                    type: 'POST',
+                    url: ApiClient.getUrl('SmarterPlaylist/Validate'),
+                    data: JSON.stringify({ RawJson: json }),
+                    contentType: 'application/json',
+                    dataType: 'json'
+                }).then(function (diags) {
+                    setValidation(summariseDiagnostics(diags));
+                    document.querySelector('#sp-editor-problems').innerHTML = renderDiagnostics(diags);
+                    return diags;
+                }, function () {
+                    setValidation('Could not validate. Check the Jellyfin log.');
+                    return null;
+                });
+            }
+
+            // Debounced, never per keystroke.
+            function scheduleValidation() {
+                if (editor.timer) { clearTimeout(editor.timer); }
+                setValidation('Checking\u2026');
+                editor.timer = setTimeout(function () { editor.timer = null; runValidation(); }, 600);
+            }
+
+            function openEditor(mode) {
+                editor.mode = mode;
+                var page = document.querySelector('#SmarterPlaylistConfigPage');
+                page.querySelector('#sp-editor').classList.remove('hide');
+                page.querySelector('#sp-detail').classList.remove('hide');
+                page.querySelector('#sp-newname-wrap').style.display = (mode === 'create') ? '' : 'none';
+                page.querySelector('#sp-revert').classList.toggle('hide', mode === 'create');
+            }
+
             function showDetail(fileName) {
                 var page = document.querySelector('#SmarterPlaylistConfigPage');
                 ApiClient.getJSON(ApiClient.getUrl('SmarterPlaylist/Definitions/' + encodeURIComponent(fileName))).then(function (d) {
                     page.querySelector('#sp-detail-title').textContent = d.Summary.Name || fileName;
                     var body = '';
                     body += '<p class="fieldDescription">File: <code>' + esc(fileName) + '.json</code></p>';
-                    if (d.Diagnostics && d.Diagnostics.length) {
-                        body += '<h4>Problems</h4>' + renderDiagnostics(d.Diagnostics);
-                    } else {
-                        body += '<p>' + icon('check_circle_outline', '') + 'No problems found.</p>';
-                    }
                     var r = d.Summary.LastRefresh;
                     if (r && r.ErrorMessage) {
-                        body += '<h4>Last refresh</h4><p>' + icon('error_outline', '') + esc(r.ErrorMessage) + '</p>';
+                        body += '<p>' + icon('error_outline', '') + esc(r.ErrorMessage) + '</p>';
                     }
-                    body += '<h4>Definition</h4><pre style="overflow-x:auto;padding:0.75em;border-radius:4px;background:rgba(127,127,127,0.12);">'
-                         + esc(d.RawJson) + '</pre>';
                     page.querySelector('#sp-detail-body').innerHTML = body;
-                    page.querySelector('#sp-detail').classList.remove('hide');
+
+                    editor.fileName = fileName;
+                    editor.sourceHash = d.SourceHash;
+                    editor.original = d.RawJson;
+                    page.querySelector('#spDefinitionJson').value = d.RawJson;
+                    page.querySelector('#sp-editor-problems').innerHTML = renderDiagnostics(d.Diagnostics);
+                    setValidation(summariseDiagnostics(d.Diagnostics));
+
+                    openEditor('edit');
                     page.querySelector('#sp-detail-title').focus();
                 });
+            }
+
+            function startCreate() {
+                var page = document.querySelector('#SmarterPlaylistConfigPage');
+                ApiClient.getJSON(ApiClient.getUrl('SmarterPlaylist/Schema')).then(function (schema) {
+                    var seed = {
+                        Name: 'My playlist',
+                        User: '',
+                        MaxItems: schema.DefaultMaxItems,
+                        ExpressionSets: [ { Expressions: [ { MemberName: 'Genres', Operator: 'Contains', TargetValue: 'Comedy' } ] } ],
+                        Order: { Name: 'NoOrder' }
+                    };
+                    page.querySelector('#sp-detail-title').textContent = 'New definition';
+                    page.querySelector('#sp-detail-body').innerHTML =
+                        '<p class="fieldDescription">Set <code>User</code> to a user on this server, then adjust the rules.</p>';
+                    page.querySelector('#spNewFileName').value = '';
+                    page.querySelector('#spDefinitionJson').value = JSON.stringify(seed, null, 4);
+                    page.querySelector('#sp-editor-problems').innerHTML = '';
+                    editor.fileName = null;
+                    editor.sourceHash = null;
+                    editor.original = '';
+                    openEditor('create');
+                    runValidation();
+                    page.querySelector('#spNewFileName').focus();
+                });
+            }
+
+            function closeEditor() {
+                var page = document.querySelector('#SmarterPlaylistConfigPage');
+                page.querySelector('#sp-detail').classList.add('hide');
+                page.querySelector('#sp-editor').classList.add('hide');
+                editor.mode = null;
+            }
+
+            function reportProblems(resp) {
+                var diags = (resp && resp.Diagnostics) ? resp.Diagnostics : null;
+                if (diags) {
+                    document.querySelector('#sp-editor-problems').innerHTML = renderDiagnostics(diags);
+                    setValidation('Not saved. ' + summariseDiagnostics(diags));
+                } else {
+                    setValidation('Not saved. Check the Jellyfin log.');
+                }
+            }
+
+            function save(page) {
+                var json = page.querySelector('#spDefinitionJson').value;
+
+                if (editor.mode === 'create') {
+                    var name = page.querySelector('#spNewFileName').value.trim();
+                    ApiClient.ajax({
+                        type: 'POST',
+                        url: ApiClient.getUrl('SmarterPlaylist/Definitions'),
+                        data: JSON.stringify({ FileName: name, RawJson: json }),
+                        contentType: 'application/json',
+                        dataType: 'json'
+                    }).then(function (d) {
+                        Dashboard.alert('Created ' + name + '.json');
+                        closeEditor();
+                        load(page);
+                    }, function (err) {
+                        parseError(err).then(reportProblems);
+                    });
+                    return;
+                }
+
+                ApiClient.ajax({
+                    type: 'PUT',
+                    url: ApiClient.getUrl('SmarterPlaylist/Definitions/' + encodeURIComponent(editor.fileName)),
+                    data: JSON.stringify({ RawJson: json, SourceHash: editor.sourceHash }),
+                    contentType: 'application/json',
+                    dataType: 'json'
+                }).then(function (d) {
+                    editor.sourceHash = d.SourceHash;
+                    editor.original = d.RawJson;
+                    setValidation('Saved. ' + summariseDiagnostics(d.Diagnostics));
+                    document.querySelector('#sp-editor-problems').innerHTML = renderDiagnostics(d.Diagnostics);
+                    load(page);
+                }, function (err) {
+                    if (err && err.status === 409) {
+                        parseError(err).then(function (c) {
+                            handleConflict(page, c);
+                        });
+                    } else {
+                        parseError(err).then(reportProblems);
+                    }
+                });
+            }
+
+            function parseError(err) {
+                try {
+                    if (err && typeof err.json === 'function') { return err.json().catch(function () { return null; }); }
+                } catch (e) { /* fall through */ }
+                return Promise.resolve(null);
+            }
+
+            // The client's hash is stale by definition here, so the server hands back the current one.
+            function handleConflict(page, c) {
+                if (!c) { setValidation('This definition changed on disk. Reload before saving.'); return; }
+                setValidation(c.Message);
+                var keep = window.confirm(
+                    c.Message + '\n\nOK = overwrite the version on disk with your edits.\nCancel = discard your edits and reload.');
+                if (keep) {
+                    editor.sourceHash = c.SourceHash;
+                    save(page);
+                } else {
+                    page.querySelector('#spDefinitionJson').value = c.RawJson;
+                    editor.sourceHash = c.SourceHash;
+                    editor.original = c.RawJson;
+                    runValidation();
+                }
             }
 
             function load(page) {
@@ -203,9 +406,30 @@
                 load(page);
 
                 page.querySelector('#sp-reload').addEventListener('click', function () { load(page); });
+                page.querySelector('#sp-new').addEventListener('click', function () { startCreate(); });
                 page.querySelector('#sp-rows').addEventListener('click', function (e) {
                     var btn = e.target.closest ? e.target.closest('.sp-open') : null;
                     if (btn) { showDetail(btn.getAttribute('data-file')); }
+                });
+
+                var ta = page.querySelector('#spDefinitionJson');
+                ta.addEventListener('input', scheduleValidation);
+                ta.addEventListener('blur', function () {
+                    if (editor.timer) { clearTimeout(editor.timer); editor.timer = null; }
+                    if (editor.mode) { runValidation(); }
+                });
+                // Tab must move focus. Trapping it in a textarea is a keyboard trap; indentation is
+                // the author's problem.
+
+                page.querySelector('#sp-save').addEventListener('click', function () { save(page); });
+                page.querySelector('#sp-cancel').addEventListener('click', function () {
+                    if (editor.mode && ta.value !== editor.original
+                        && !window.confirm('Discard your unsaved changes?')) { return; }
+                    closeEditor();
+                });
+                page.querySelector('#sp-revert').addEventListener('click', function () {
+                    ta.value = editor.original;
+                    runValidation();
                 });
             });
         })();
