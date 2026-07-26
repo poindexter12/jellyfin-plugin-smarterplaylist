@@ -27,9 +27,14 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
         /// <returns>The filter vocabulary.</returns>
         public static SchemaResponse Build()
         {
+            // LibraryValues is stamped on afterwards rather than threaded through every Describe
+            // branch: whether a member's values can be listed is a fact about the member, not about
+            // the CLR type Describe is classifying, and keeping it in one place means adding a
+            // listable member touches LibraryValueSource only.
             var members = typeof(Operand)
                 .GetProperties()
                 .Select(Describe)
+                .Select(m => m with { LibraryValues = LibraryValueSource.IsSupported(m.Name) })
                 .OrderBy(m => m.Name, StringComparer.Ordinal)
                 .ToList();
 

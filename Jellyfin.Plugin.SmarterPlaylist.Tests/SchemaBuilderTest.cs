@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Jellyfin.Plugin.SmarterPlaylist.Api;
 using Jellyfin.Plugin.SmarterPlaylist.QueryEngine;
@@ -148,6 +149,37 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
                     Assert.True(ex is null, $"{member.Name}/{op} is advertised but failed to compile: {ex?.Message}");
                 }
             }
+        }
+
+        // The page decides whether to draw a value picker from this flag alone, so a member that can be
+        // listed but is not flagged silently loses its picker and goes back to being a blank text box.
+        [Fact]
+        public void EveryListableMemberIsFlaggedForTheValuePicker()
+        {
+            var members = SchemaBuilder.Build().Members.ToDictionary(m => m.Name, StringComparer.Ordinal);
+
+            foreach (var name in new[]
+                     {
+                         "Actors", "Album", "Composers", "Directors", "Genres", "GuestStars",
+                         "OfficialRating", "Producers", "SeasonName", "SeriesName", "Studios", "Tags", "Writers"
+                     })
+            {
+                Assert.True(members[name].LibraryValues, $"{name} should offer library values");
+            }
+        }
+
+        [Theory]
+        [InlineData("Name")]
+        [InlineData("FolderPath")]
+        [InlineData("MediaType")]
+        [InlineData("CommunityRating")]
+        [InlineData("IsPlayed")]
+        [InlineData("PremiereDate")]
+        public void MembersWithNothingToListAreNotFlagged(string name)
+        {
+            var member = Assert.Single(SchemaBuilder.Build().Members.Where(m => m.Name == name));
+
+            Assert.False(member.LibraryValues);
         }
     }
 }

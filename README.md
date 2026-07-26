@@ -123,9 +123,29 @@ Notes:
 - `Equal` and `NotEqual` come from the [LINQ expression operators](https://docs.microsoft.com/en-us/dotnet/api/system.linq.expressions.expressiontype), so any name from that list is accepted, but only the ones above make sense for a given property type.
 - Date properties accept either a readable date (`"2020-07-01"`, `"2020-07-01T00:00:00Z"`) or a raw Unix timestamp. Readable dates are treated as UTC. Anything that is neither is rejected with an error naming the property.
 - A bare year such as `"2020"` is rejected, because it is indistinguishable from a Unix timestamp and would silently mean 1970. Write `"2020-01-01"` instead.
-- On a list property, `Contains` requires a whole exact element — `"Contains": "Grey"` will not match a director named `CGP Grey`. Use `MatchRegex` for partial matches.
+- On a list property, `Contains` requires a whole exact element — `"Contains": "Grey"` will not match a director named `CGP Grey`. Use `MatchRegex` for partial matches, or pick the value from the list the configuration page offers (below).
 - On a list property, `MatchRegex` matches if **any** element matches, and `NotMatchRegex` holds only if **no** element matches.
 - Using an operator a property does not support fails the refresh for that playlist and logs the error to the Jellyfin server log.
+
+### Picking values from your library
+
+Typing a name by hand is the easiest way to build a rule that matches nothing: comparisons are exact
+and case-sensitive, so a near miss saves cleanly and then produces an empty playlist with no error
+anywhere.
+
+For the properties whose values the library already knows — `Actors`, `Album`, `Composers`,
+`Directors`, `Genres`, `GuestStars`, `OfficialRating`, `SeasonName`, `SeriesName`, `Studios`, `Tags`
+and `Writers` — the configuration page offers the values that are actually there. Start typing and
+the list narrows. Values come from the library of the user the definition names, so choose the user
+first.
+
+You can still type a value that is not offered: a rule may name something not in the library yet, and
+on a very large library the list is capped. When the value you have typed is not one the library
+holds, the page says so under the field rather than letting it save quietly and fail at the next
+refresh.
+
+Values are not offered for `MatchRegex` and `NotMatchRegex`, where the value is a pattern rather than
+a name.
 
 ### Deleting a definition
 
