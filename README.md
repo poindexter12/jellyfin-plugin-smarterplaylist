@@ -102,7 +102,9 @@ To play everything in a franchise in order, filter on `SeriesName` and pick a so
 originally aired. `Series, Season, Episode` plays one show through to the end before starting the next.
 
 Set `MaxItems` deliberately for a franchise this size: the default cap is 1000, and Star Trek across all
-series is close to 900 episodes.
+series is close to 900 episodes. Use **Preview matches** in the configuration page to see how many items a
+definition selects, and the first few titles in playlist order, before saving it — it also reports when the
+cap would discard matches.
 
 ### Which operators work on which properties
 
