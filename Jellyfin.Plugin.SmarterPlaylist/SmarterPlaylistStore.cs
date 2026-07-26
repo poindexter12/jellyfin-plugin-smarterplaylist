@@ -66,14 +66,22 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         }
 
         /// <inheritdoc />
-        public void Delete(Guid userId, string smarterPlaylistId)
+        public bool Delete(string fileName)
         {
-            var filePath = _fileSystem.GetSmarterPlaylistPath(userId.ToString(), smarterPlaylistId);
+            // Resolved by enumerating the folder and matching names, never by joining the caller's
+            // value onto BasePath. The value therefore never reaches the file system as a path
+            // fragment, so traversal is unrepresentable rather than merely guarded against.
+            var path = _fileSystem.GetAllSmarterPlaylistFilePaths()
+                .FirstOrDefault(p => string.Equals(Path.GetFileNameWithoutExtension(p), fileName, StringComparison.Ordinal));
 
-            if (File.Exists(filePath))
+            if (path is null)
             {
-                File.Delete(filePath);
+                return false;
             }
+
+            File.Delete(path);
+
+            return true;
         }
 
         /// <summary>

@@ -38,8 +38,13 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         /// <summary>
         /// Deletes a playlist definition.
         /// </summary>
-        /// <param name="userId">Id of the owning user.</param>
-        /// <param name="smarterPlaylistId">File name of the definition to delete, without extension.</param>
-        void Delete(Guid userId, string smarterPlaylistId);
+        /// <remarks>
+        /// The name is matched against the files already on disk rather than turned into a path, so a
+        /// caller-supplied value cannot address anything outside the definitions folder. Deleting is the
+        /// one irreversible operation the plugin exposes, which is why the name never becomes a path here.
+        /// </remarks>
+        /// <param name="fileName">On-disk name of the definition to delete, without extension.</param>
+        /// <returns><c>true</c> if a definition was deleted; <c>false</c> if no such definition exists.</returns>
+        bool Delete(string fileName);
     }
 }

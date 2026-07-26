@@ -31,5 +31,16 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         /// </summary>
         /// <returns>A snapshot of all known outcomes.</returns>
         IReadOnlyDictionary<string, RefreshStatus> GetAll();
+
+        /// <summary>
+        /// Drops the recorded outcome for a definition that no longer exists.
+        /// </summary>
+        /// <remarks>
+        /// Entries are keyed by file name, so without this a definition deleted and then re-created under
+        /// the same name would show the deleted one's last outcome — including its failure — until the
+        /// next task run.
+        /// </remarks>
+        /// <param name="fileName">On-disk name of the definition, without extension.</param>
+        void Forget(string fileName);
     }
 }

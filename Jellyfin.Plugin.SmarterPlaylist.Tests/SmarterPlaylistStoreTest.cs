@@ -98,6 +98,66 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
         }
 
         [Fact]
+        public void DeleteRemovesTheDefinitionNamedOnDisk()
+        {
+            WriteDefinition("doomed", "doomed");
+            WriteDefinition("bystander", "bystander");
+
+            Assert.True(_store.Delete("doomed"));
+
+            Assert.False(File.Exists(Path.Join(_basePath, "doomed.json")));
+            Assert.True(File.Exists(Path.Join(_basePath, "bystander.json")));
+        }
+
+        [Fact]
+        public void DeleteReportsWhenThereWasNothingToDelete()
+        {
+            WriteDefinition("present", "present");
+
+            Assert.False(_store.Delete("absent"));
+
+            Assert.Single(Directory.GetFiles(_basePath, "*.json"));
+        }
+
+        // The name comes from a route segment, so it must never be able to address a file the
+        // enumeration would not have returned. Matching on the enumerated names means a traversal
+        // sequence does not resolve to anything rather than resolving to something outside the folder.
+        [Theory]
+        [InlineData("../outside")]
+        [InlineData("subdir/nested")]
+        [InlineData("*")]
+        [InlineData("victim.json")]
+        public void DeleteRefusesNamesThatAreNotADefinitionOnDisk(string name)
+        {
+            WriteDefinition("victim", "victim");
+            var outside = Path.Join(Path.GetDirectoryName(_basePath), "outside.json");
+            File.WriteAllText(outside, "{}");
+
+            try
+            {
+                Assert.False(_store.Delete(name));
+
+                Assert.True(File.Exists(Path.Join(_basePath, "victim.json")));
+                Assert.True(File.Exists(outside));
+            }
+            finally
+            {
+                File.Delete(outside);
+            }
+        }
+
+        // Names are compared exactly. Deleting is irreversible, so "close enough" is not a match.
+        [Fact]
+        public void DeleteIsCaseSensitiveLikeEveryOtherLookup()
+        {
+            WriteDefinition("Casing", "Casing");
+
+            Assert.False(_store.Delete("casing"));
+
+            Assert.True(File.Exists(Path.Join(_basePath, "Casing.json")));
+        }
+
+        [Fact]
         public async Task MalformedJsonFailsNamingTheFile()
         {
             await File.WriteAllTextAsync(Path.Join(_basePath, "broken.json"), "{ not json");
