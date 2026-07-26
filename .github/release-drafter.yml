@@ -113,6 +113,23 @@ template: |-
 
   $CHANGES
 
-  Install from the plugin repository, or download `Jellyfin.Plugin.SmarterPlaylist.dll` from the
-  assets below and drop it in your Jellyfin plugin directory. The required Jellyfin version is
-  recorded as `targetAbi` in `build.yaml` for this release.
+  ## Installing
+
+  **From the plugin repository (recommended).** Add this URL under
+  *Dashboard → Plugins → Repositories*, then install **Smarter Playlist** from the catalogue and
+  restart. Updates arrive through Jellyfin's normal plugin update flow.
+
+  ```
+  https://raw.githubusercontent.com/poindexter12/jellyfin-plugin-smarterplaylist/main/manifest.json
+  ```
+
+  **Manually.** Extract the `.zip` below into its own folder inside your Jellyfin plugin directory —
+  named the way the catalogue names it, `Smarter Playlist_<version>` — then restart.
+
+  > **Delete any existing `Smarter Playlist_*` folder first.** Jellyfin loads every plugin folder it
+  > finds, so leaving the old one behind registers this plugin twice under the same id. It does not
+  > fail loudly: the dashboard reports "An error occurred while getting the list of currently
+  > installed plugins" and configuration pages stop loading, which looks like a broken release rather
+  > than a leftover directory.
+
+  The Jellyfin version this build requires is recorded as `targetAbi` in `build.yaml`.
