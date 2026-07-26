@@ -142,6 +142,38 @@
                         <button is="emby-button" type="button" id="sp-cancel" class="raised">
                             <span>Close</span>
                         </button>
+                        <button is="emby-button" type="button" id="sp-delete" class="raised button-alt hide"
+                                style="float:right;border:1px solid #c62828;">
+                            <span>Delete</span>
+                        </button>
+                    </div>
+
+                    <!-- Inline rather than a modal: Dashboard.confirm carries a message and a callback and
+                         nothing else, so the choice about the orphaned Jellyfin playlist has nowhere to live
+                         inside it. -->
+                    <div id="sp-delete-confirm" class="verticalSection hide"
+                         style="border:1px solid #c62828;border-radius:4px;padding:0.75em;">
+                        <h4 id="sp-delete-heading" tabindex="-1" style="margin-top:0;"></h4>
+                        <p class="fieldDescription" id="sp-delete-copy"></p>
+
+                        <fieldset id="sp-delete-choice" style="border:0;padding:0;margin:0 0 0.75em 0;">
+                            <legend class="clipForScreenReader">What should happen to the Jellyfin playlist?</legend>
+                            <label style="display:block;margin-bottom:0.4em;">
+                                <input type="radio" is="emby-radio" name="spDeletePlaylist" value="keep" checked>
+                                <span>Keep the Jellyfin playlist as a static list</span>
+                            </label>
+                            <label style="display:block;">
+                                <input type="radio" is="emby-radio" name="spDeletePlaylist" value="delete">
+                                <span id="sp-delete-also">Also delete the Jellyfin playlist</span>
+                            </label>
+                        </fieldset>
+
+                        <button is="emby-button" type="button" id="sp-delete-go" class="raised">
+                            <span>Delete definition</span>
+                        </button>
+                        <button is="emby-button" type="button" id="sp-delete-cancel" class="raised">
+                            <span>Cancel</span>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -433,7 +465,7 @@
             }
 
             // Editor state. mode is 'edit' or 'create'.
-            var editor = { mode: null, fileName: null, sourceHash: null, original: '', timer: null };
+            var editor = { mode: null, fileName: null, sourceHash: null, original: '', timer: null, summary: null };
 
             function setValidation(text) {
                 document.querySelector('#sp-validation').textContent = text;
@@ -483,6 +515,9 @@
                 page.querySelector('#sp-detail').classList.remove('hide');
                 page.querySelector('#sp-newname-wrap').style.display = (mode === 'create') ? '' : 'none';
                 page.querySelector('#sp-revert').classList.toggle('hide', mode === 'create');
+                // There is nothing on disk to delete until the definition has been created.
+                page.querySelector('#sp-delete').classList.toggle('hide', mode === 'create');
+                page.querySelector('#sp-delete-confirm').classList.add('hide');
                 showTab('rules');
             }
 
@@ -501,6 +536,7 @@
                     editor.fileName = fileName;
                     editor.sourceHash = d.SourceHash;
                     editor.original = d.RawJson;
+                    editor.summary = d.Summary;
                     page.querySelector('#spDefinitionJson').value = d.RawJson;
                     page.querySelector('#sp-editor-problems').innerHTML = renderDiagnostics(d.Diagnostics);
                     setValidation(summariseDiagnostics(d.Diagnostics));
@@ -532,6 +568,7 @@
                     editor.fileName = null;
                     editor.sourceHash = null;
                     editor.original = '';
+                    editor.summary = null;
                     openEditor('create');
                     runValidation();
                     page.querySelector('#spNewFileName').focus();
@@ -542,7 +579,85 @@
                 var page = document.querySelector('#SmarterPlaylistConfigPage');
                 page.querySelector('#sp-detail').classList.add('hide');
                 page.querySelector('#sp-editor').classList.add('hide');
+                page.querySelector('#sp-delete-confirm').classList.add('hide');
                 editor.mode = null;
+            }
+
+            // ---- Delete -------------------------------------------------------------------
+            // The only irreversible action on this page, so it asks first, and it asks the one
+            // question the answer is not obvious for: what happens to the Jellyfin playlist.
+
+            function showDeleteConfirm(page) {
+                var s = editor.summary || {};
+                var linked = s.PlaylistState === 'Ok' || s.PlaylistState === 2;
+                var name = s.Name || editor.fileName;
+
+                page.querySelector('#sp-delete-heading').textContent = 'Delete "' + name + '"?';
+                page.querySelector('#sp-delete-copy').textContent = linked
+                    ? 'This removes ' + editor.fileName + '.json. It cannot be undone.'
+                    : 'This removes ' + editor.fileName + '.json. No Jellyfin playlist is linked to it.';
+
+                // With no playlist to orphan there is no question to ask, so the choice is not offered
+                // rather than offered with both answers meaning the same thing.
+                page.querySelector('#sp-delete-choice').classList.toggle('hide', !linked);
+                if (linked) {
+                    var count = (s.PlaylistItemCount === null || s.PlaylistItemCount === undefined)
+                        ? '' : ' (' + s.PlaylistItemCount + ' item' + (s.PlaylistItemCount === 1 ? '' : 's') + ')';
+                    page.querySelector('#sp-delete-also').textContent =
+                        'Also delete the Jellyfin playlist "' + name + '"' + count;
+                }
+
+                // Keep is the default every time the block opens: the playlist may be shared, queued or
+                // favourited, so data loss is never carried over from a previous answer.
+                page.querySelectorAll('input[name="spDeletePlaylist"]').forEach(function (r) {
+                    r.checked = r.value === 'keep';
+                });
+
+                page.querySelector('#sp-delete-confirm').classList.remove('hide');
+                page.querySelector('#sp-delete-heading').focus();
+            }
+
+            function hideDeleteConfirm(page) {
+                page.querySelector('#sp-delete-confirm').classList.add('hide');
+                page.querySelector('#sp-delete').focus();
+            }
+
+            var deleteInFlight = false;
+
+            function doDelete(page) {
+                // A second click before the first response would send a second DELETE, and the reply
+                // to it -- 404, the file having just gone -- would report a failure for an operation
+                // that in fact succeeded.
+                if (deleteInFlight) { return; }
+                deleteInFlight = true;
+
+                var choice = page.querySelector('input[name="spDeletePlaylist"]:checked');
+                var alsoPlaylist = !page.querySelector('#sp-delete-choice').classList.contains('hide')
+                    && !!choice && choice.value === 'delete';
+                var fileName = editor.fileName;
+
+                ApiClient.ajax({
+                    type: 'DELETE',
+                    url: ApiClient.getUrl(
+                        'SmarterPlaylist/Definitions/' + encodeURIComponent(fileName),
+                        { deletePlaylist: alsoPlaylist })
+                }).then(function () {
+                    deleteInFlight = false;
+                    closeEditor();
+                    Dashboard.alert('Deleted ' + fileName + '.json'
+                        + (alsoPlaylist ? ' and its Jellyfin playlist' : ''));
+                    load(page);
+                    // The button that had focus has just been hidden along with the editor, so focus
+                    // would otherwise fall to the document and strand a keyboard user at the top of
+                    // the dashboard. The reloaded count is announced by #sp-status's live region.
+                    page.querySelector('#sp-new').focus();
+                }, function (err) {
+                    deleteInFlight = false;
+                    setValidation(err && err.status === 404
+                        ? 'Not deleted. ' + fileName + '.json is no longer on disk. Reload the list.'
+                        : 'Could not delete ' + fileName + '.json. Check the Jellyfin log.');
+                    hideDeleteConfirm(page);
+                });
             }
 
             // Answers "would this rule actually pick what I think it picks" before saving, which
@@ -627,6 +742,9 @@
                 }).then(function (d) {
                     editor.sourceHash = d.SourceHash;
                     editor.original = d.RawJson;
+                    // The delete confirmation names the playlist and its item count from this. Left
+                    // stale, deleting after a rename would ask about the playlist's previous name.
+                    editor.summary = d.Summary;
                     setValidation('Saved. ' + summariseDiagnostics(d.Diagnostics));
                     document.querySelector('#sp-editor-problems').innerHTML = renderDiagnostics(d.Diagnostics);
                     load(page);
@@ -774,6 +892,20 @@
                 page.querySelector('#sp-revert').addEventListener('click', function () {
                     ta.value = editor.original;
                     runValidation();
+                });
+
+                page.querySelector('#sp-delete').addEventListener('click', function () { showDeleteConfirm(page); });
+                page.querySelector('#sp-delete-cancel').addEventListener('click', function () { hideDeleteConfirm(page); });
+                page.querySelector('#sp-delete-go').addEventListener('click', function () { doDelete(page); });
+
+                // Escape backs out of the confirmation, which is the expected way to leave a
+                // destructive prompt. Bound on the block itself so it cannot cancel anything else,
+                // and focus goes back to the button that opened it rather than to the page.
+                page.querySelector('#sp-delete-confirm').addEventListener('keydown', function (e) {
+                    if (e.key === 'Escape' || e.keyCode === 27) {
+                        e.stopPropagation();
+                        hideDeleteConfirm(page);
+                    }
                 });
             });
         })();

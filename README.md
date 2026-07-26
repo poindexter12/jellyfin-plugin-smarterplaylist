@@ -127,6 +127,23 @@ Notes:
 - On a list property, `MatchRegex` matches if **any** element matches, and `NotMatchRegex` holds only if **no** element matches.
 - Using an operator a property does not support fails the refresh for that playlist and logs the error to the Jellyfin server log.
 
+### Deleting a definition
+
+Open the definition in the configuration page and use **Delete**. It asks what should happen to the
+Jellyfin playlist the definition built:
+
+- **Keep the Jellyfin playlist as a static list** (the default). The `.json` file goes; the playlist
+  stays exactly as it was at the last refresh, and nothing updates it again. Choose this if anyone
+  might have the playlist queued, favourited, or shared.
+- **Also delete the Jellyfin playlist.** Both go.
+
+Deleting the file by hand out of the definitions folder does the same as the first option.
+
+There is no rename. A definition's file name is its identity, and the plugin refuses a save whose
+`FileName` disagrees with the name on disk rather than silently writing a second file. To rename one,
+create a new definition under the name you want and delete the old one — the new playlist is built
+from scratch on the next refresh.
+
 ## Future work
 
 - Add in more properties to be matched against. Please file a feature request if you have ideas. Good candidates Jellyfin already exposes: production year, official rating, tags, runtime, and series name.

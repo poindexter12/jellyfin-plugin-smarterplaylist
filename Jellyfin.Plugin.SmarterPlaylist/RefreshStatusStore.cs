@@ -34,5 +34,11 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         {
             return new Dictionary<string, RefreshStatus>(_statuses, StringComparer.OrdinalIgnoreCase);
         }
+
+        /// <inheritdoc />
+        public void Forget(string fileName)
+        {
+            _statuses.TryRemove(fileName, out _);
+        }
     }
 }
