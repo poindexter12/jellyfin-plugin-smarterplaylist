@@ -82,6 +82,40 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             Assert.Equal(["Equal", "NotEqual"], Member("IsPlayed").Operators);
         }
 
+        // The two ratings use different scales. Sharing one 0-10 control made every realistic
+        // critic-rating rule unenterable.
+        [Fact]
+        public void RatingMembersCarryTheirOwnRanges()
+        {
+            var community = Member("CommunityRating");
+            var critic = Member("CriticRating");
+
+            Assert.Equal(10, community.Maximum);
+            Assert.Equal(0.1, community.Step);
+            Assert.Equal(100, critic.Maximum);
+            Assert.Equal(1, critic.Step);
+            Assert.Contains("percentage", critic.Notes!, System.StringComparison.Ordinal);
+        }
+
+        // Ordering or substring operators against a fixed enum value are meaningless, so the UI
+        // must not offer them.
+        [Fact]
+        public void EnumMembersOfferOnlyEqualityOperators()
+        {
+            Assert.Equal(["Equal", "NotEqual", "Equals"], Member("MediaType").Operators);
+        }
+
+        [Fact]
+        public void OnlyNumericMembersCarryRangeHints()
+        {
+            foreach (var m in SchemaBuilder.Build().Members.Where(m => m.Kind != MemberKind.Number))
+            {
+                Assert.Null(m.Minimum);
+                Assert.Null(m.Maximum);
+                Assert.Null(m.Step);
+            }
+        }
+
         [Fact]
         public void SchemaExposesOrdersAndMediaTypes()
         {
