@@ -60,6 +60,14 @@ jobs:
             echo "MANIFEST_OVERVIEW=$(yq -r '.overview' build.yaml)"
             echo "MANIFEST_OWNER=$(yq -r '.owner' build.yaml)"
             echo "MANIFEST_CATEGORY=$(yq -r '.category' build.yaml)"
+            echo "MANIFEST_IMAGE=$(yq -r '.imageUrl // ""' build.yaml)"
+          } >> "$GITHUB_ENV"
+
+          # description is a folded block in build.yaml, so it can span lines; the others cannot.
+          {
+            echo "MANIFEST_DESCRIPTION<<MANIFEST_DESCRIPTION_EOF"
+            yq -r '.description' build.yaml
+            echo "MANIFEST_DESCRIPTION_EOF"
           } >> "$GITHUB_ENV"
 
       - name: Guard against a version mismatch
@@ -120,16 +128,21 @@ jobs:
           path = pathlib.Path('manifest.json')
           manifest = json.loads(path.read_text()) if path.exists() else []
           if not manifest:
-              manifest = [{
-                  "guid": os.environ['MANIFEST_GUID'],
-                  "name": os.environ['MANIFEST_NAME'],
-                  "description": os.environ['MANIFEST_OVERVIEW'],
-                  "overview": os.environ['MANIFEST_OVERVIEW'],
-                  "owner": os.environ['MANIFEST_OWNER'],
-                  "category": os.environ['MANIFEST_CATEGORY'],
-                  "imageUrl": None,
-                  "versions": [],
-              }]
+              manifest = [{"versions": []}]
+
+          # Refreshed on every publish, not just when the file is first created. build.yaml is the
+          # source of truth for this metadata, and seeding it once meant an edit there -- a reworded
+          # overview, a new imageUrl -- was silently never published, because the only code that read
+          # it ran exclusively on the very first release.
+          manifest[0].update({
+              "guid":        os.environ['MANIFEST_GUID'],
+              "name":        os.environ['MANIFEST_NAME'],
+              "description": os.environ['MANIFEST_DESCRIPTION'],
+              "overview":    os.environ['MANIFEST_OVERVIEW'],
+              "owner":       os.environ['MANIFEST_OWNER'],
+              "category":    os.environ['MANIFEST_CATEGORY'],
+              "imageUrl":    os.environ.get('MANIFEST_IMAGE') or None,
+          })
 
           # Newest first, and republishing a tag replaces its entry rather than duplicating it.
           versions = [v for v in manifest[0]['versions'] if v['version'] != version]
