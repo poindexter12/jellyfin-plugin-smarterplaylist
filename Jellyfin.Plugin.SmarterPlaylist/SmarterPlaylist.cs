@@ -42,6 +42,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist
             {
                 PremiereDateOrder.OrderName => new PremiereDateOrder(),
                 PremiereDateOrderDesc.OrderName => new PremiereDateOrderDesc(),
+                SeriesEpisodeOrder.OrderName => new SeriesEpisodeOrder(),
                 _ => new NoOrder(),
             };
         }

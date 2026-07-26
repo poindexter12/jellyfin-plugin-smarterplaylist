@@ -33,7 +33,13 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
                 .OrderBy(m => m.Name, StringComparer.Ordinal)
                 .ToList();
 
-            var orders = new[] { NoOrder.OrderName, PremiereDateOrder.OrderName, PremiereDateOrderDesc.OrderName };
+            var orders = new[]
+            {
+                NoOrder.OrderName,
+                PremiereDateOrder.OrderName,
+                PremiereDateOrderDesc.OrderName,
+                SeriesEpisodeOrder.OrderName
+            };
             var mediaTypes = Enum.GetNames<Jellyfin.Data.Enums.MediaType>();
 
             return new SchemaResponse(members, orders, mediaTypes, SmarterPlaylist.DefaultMaxItems);

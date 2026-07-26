@@ -94,6 +94,51 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
         public string Album { get; set; } = string.Empty;
 
         /// <summary>
+        /// Gets or sets the name of the show an episode belongs to, or empty for anything else.
+        /// </summary>
+        /// <remarks>
+        /// This is what makes a franchise selectable. Matching every Star Trek series means a rule on
+        /// this member rather than on the folder path, which only works if the library happens to be
+        /// organised that way.
+        /// </remarks>
+        public string SeriesName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets the name of the season an episode belongs to, or empty for anything else.
+        /// </summary>
+        public string SeasonName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets the season number of an episode, or zero when it has none.
+        /// </summary>
+        public int SeasonNumber { get; set; }
+
+        /// <summary>
+        /// Gets or sets the episode number within its season, or zero when it has none.
+        /// </summary>
+        public int EpisodeNumber { get; set; }
+
+        /// <summary>
+        /// Gets or sets the year the item was produced, or zero when unknown.
+        /// </summary>
+        public int ProductionYear { get; set; }
+
+        /// <summary>
+        /// Gets or sets the official rating, such as a content certificate, or empty when unset.
+        /// </summary>
+        public string OfficialRating { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets the tags assigned to the item.
+        /// </summary>
+        public Collection<string> Tags { get; } = [];
+
+        /// <summary>
+        /// Gets or sets the runtime in minutes, or zero when unknown.
+        /// </summary>
+        public double RunTimeMinutes { get; set; }
+
+        /// <summary>
         /// Gets or sets the time the item was added to the library, in Unix seconds.
         /// </summary>
         public double DateCreated { get; set; }

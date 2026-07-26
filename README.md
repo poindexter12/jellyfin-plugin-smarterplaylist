@@ -79,6 +79,30 @@ To create a new playlist, create a json file in this directory having a format s
   - NoOrder
   - Release Date Ascending
   - Release Date Descending
+  - Series, Season, Episode
+
+### Watching a whole franchise
+
+To play everything in a franchise in order, filter on `SeriesName` and pick a sort order:
+
+```json
+{
+  "Name": "All of Star Trek",
+  "FileName": "star_trek",
+  "User": "rob",
+  "MaxItems": 1000,
+  "ExpressionSets": [
+    { "Expressions": [ { "MemberName": "SeriesName", "Operator": "MatchRegex", "TargetValue": "^Star Trek" } ] }
+  ],
+  "Order": { "Name": "Release Date Ascending" }
+}
+```
+
+`Release Date Ascending` plays the franchise as it was broadcast, so series interleave the way they
+originally aired. `Series, Season, Episode` plays one show through to the end before starting the next.
+
+Set `MaxItems` deliberately for a franchise this size: the default cap is 1000, and Star Trek across all
+series is close to 900 episodes.
 
 ### Which operators work on which properties
 
@@ -86,9 +110,9 @@ Which operators are valid depends on the type of the property you are filtering 
 
 | Property type | Properties | Valid operators |
 |---|---|---|
-| Text | `Name`, `MediaType`, `Album`, `FolderPath` | `Equal`, `NotEqual`, `Equals`, `Contains`, `StartsWith`, `EndsWith`, `MatchRegex`, `NotMatchRegex` |
-| List of text | `Actors`, `Composers`, `Directors`, `Genres`, `GuestStars`, `Producers`, `Studios`, `Writers` | `Contains`, `MatchRegex`, `NotMatchRegex` |
-| Number | `CommunityRating`, `CriticRating` | `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual` |
+| Text | `Name`, `SeriesName`, `SeasonName`, `MediaType`, `Album`, `FolderPath`, `OfficialRating` | `Equal`, `NotEqual`, `Equals`, `Contains`, `StartsWith`, `EndsWith`, `MatchRegex`, `NotMatchRegex` |
+| List of text | `Actors`, `Composers`, `Directors`, `Genres`, `GuestStars`, `Producers`, `Studios`, `Tags`, `Writers` | `Contains`, `MatchRegex`, `NotMatchRegex` |
+| Number | `CommunityRating`, `CriticRating`, `SeasonNumber`, `EpisodeNumber`, `ProductionYear`, `RunTimeMinutes` | `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual` |
 | Date | `PremiereDate`, `DateCreated`, `DateLastRefreshed`, `DateLastSaved`, `DateModified` | `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual` |
 | True/false | `IsPlayed` | `Equal`, `NotEqual` |
 

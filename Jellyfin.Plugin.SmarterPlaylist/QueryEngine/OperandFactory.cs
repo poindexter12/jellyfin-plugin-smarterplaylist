@@ -5,6 +5,7 @@ using System.Linq;
 using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Entities;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 
 namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
@@ -64,6 +65,28 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
             if (baseItem.PremiereDate.HasValue)
             {
                 operand.PremiereDate = new DateTimeOffset(baseItem.PremiereDate.Value).ToUnixTimeSeconds();
+            }
+
+            // SeriesName and SeasonName live on Episode, not BaseItem, so they are only meaningful for
+            // episodes. Everything else stays empty rather than null, which keeps string rules from
+            // throwing on movies -- the null-oblivious trap that bit Album.
+            if (baseItem is Episode episode)
+            {
+                operand.SeriesName = episode.SeriesName ?? string.Empty;
+                operand.SeasonName = episode.SeasonName ?? string.Empty;
+                operand.SeasonNumber = episode.ParentIndexNumber.GetValueOrDefault();
+                operand.EpisodeNumber = episode.IndexNumber.GetValueOrDefault();
+            }
+
+            operand.ProductionYear = baseItem.ProductionYear.GetValueOrDefault();
+            operand.OfficialRating = baseItem.OfficialRating ?? string.Empty;
+            operand.RunTimeMinutes = baseItem.RunTimeTicks.HasValue
+                ? Math.Round(TimeSpan.FromTicks(baseItem.RunTimeTicks.Value).TotalMinutes, 2)
+                : 0;
+
+            foreach (var tag in baseItem.Tags)
+            {
+                operand.Tags.Add(tag);
             }
 
             operand.DateCreated = new DateTimeOffset(baseItem.DateCreated).ToUnixTimeSeconds();
