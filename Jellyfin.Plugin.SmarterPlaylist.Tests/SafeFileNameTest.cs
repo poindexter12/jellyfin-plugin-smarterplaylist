@@ -60,16 +60,16 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             Assert.Equal(basePath, Path.GetDirectoryName(resolved));
         }
 
-        // Path.Join keeps the base even for a rooted segment; Path.Combine would discard it entirely.
-        // This is the property the file system layer depends on.
+        // Path.Join keeps the base even for a rooted segment, which is the property the file system
+        // layer depends on. Path.Combine would return the rooted segment alone, discarding the base --
+        // that behaviour is .NET's rather than ours, so it is described here but not exercised.
         [Fact]
-        public void JoinKeepsTheBaseWhereCombineWouldDiscardIt()
+        public void JoinKeepsTheBaseEvenForARootedSegment()
         {
             var basePath = Path.Join(Path.GetTempPath(), "sp-base");
             var rooted = Path.DirectorySeparatorChar + "etc" + Path.DirectorySeparatorChar + "passwd";
 
             Assert.StartsWith(basePath, Path.Join(basePath, rooted), StringComparison.Ordinal);
-            Assert.Equal(rooted, Path.Combine(basePath, rooted));
         }
     }
 }

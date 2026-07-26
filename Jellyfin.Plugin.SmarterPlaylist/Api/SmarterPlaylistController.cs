@@ -251,7 +251,10 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
             }
 
             await System.IO.File.WriteAllTextAsync(path, request.RawJson).ConfigureAwait(false);
-            _logger.LogInformation("Saved playlist definition {Playlist}", fileName);
+
+            // Log the name taken from the resolved path rather than the request value: a request value
+            // could carry control characters and forge log lines.
+            _logger.LogInformation("Saved playlist definition {Playlist}", Path.GetFileNameWithoutExtension(path));
 
             return await BuildDetailAsync(path, fileName).ConfigureAwait(false);
         }
@@ -299,7 +302,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
             }
 
             await System.IO.File.WriteAllTextAsync(targetPath, request.RawJson).ConfigureAwait(false);
-            _logger.LogInformation("Created playlist definition {Playlist}", request.FileName);
+            _logger.LogInformation("Created playlist definition {Playlist}", Path.GetFileNameWithoutExtension(targetPath));
 
             var detail = await BuildDetailAsync(targetPath, request.FileName).ConfigureAwait(false);
 
