@@ -1,7 +1,7 @@
 ---
 name: "Smarter Playlist"
 guid: "3311dfd2-fe3b-4367-a3f0-0dcea5ba07cd"
-version: "2.10.0"
+version: "2.10.1"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Create dynamic playlists from rules"
@@ -19,5 +19,5 @@ artifacts:
   - "logo.png"
 changelog: |-
 
-  ### New features and improvements ###
-  - Give generated playlists a cover instead of a placeholder (#26) @poindexter12
+  ### Code or Repo Maintenance ###
+  - Ship the logo in the package instead of relying on a download (#28) @poindexter12
