@@ -204,6 +204,15 @@ anything.
 
 Months and years use calendar arithmetic, so `now-1m` is the same day last month, not 30 days ago.
 
+In the rule builder you do not type any of this. A date rule starts with a **Relative to now** /
+**On a date** / **Exact value** choice, and picks up the controls that fit:
+
+| Choice | Controls | Produces |
+|---|---|---|
+| Relative to now | `30` · `days` · `ago` | `now-30d` |
+| On a date | a date picker | `2020-07-01` |
+| Exact value | free text | a Unix timestamp, or anything the other two cannot express |
+
 **Anything never played counts as long ago.** `LastPlayedDate` is unset for an item you have never
 watched, and an unset value sorts before every cutoff — so `LastPlayedDate LessThan now-30d` selects
 both the things you watched months back *and* everything you have never seen. That is normally what
