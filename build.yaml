@@ -1,7 +1,7 @@
 ---
 name: "Smarter Playlist"
 guid: "3311dfd2-fe3b-4367-a3f0-0dcea5ba07cd"
-version: "2.10.1"
+version: "2.10.2"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Create dynamic playlists from rules"
@@ -20,4 +20,4 @@ artifacts:
 changelog: |-
 
   ### Code or Repo Maintenance ###
-  - Ship the logo in the package instead of relying on a download (#28) @poindexter12
+  - Close the three CodeQL findings from the last two changes (#30) @poindexter12
