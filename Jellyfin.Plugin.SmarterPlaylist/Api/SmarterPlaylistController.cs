@@ -646,7 +646,12 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(ex, "Saved {Playlist} but could not build its playlist", fileName);
+                // Named from the resolved path, not the route value: a request value can carry
+                // control characters and forge log lines. Same reason as in SaveDefinition.
+                _logger.LogError(
+                    ex,
+                    "Saved {Playlist} but could not build its playlist",
+                    Path.GetFileNameWithoutExtension(path));
                 _statusStore.Record(new RefreshStatus(
                     fileName,
                     startedUtc,
