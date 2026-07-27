@@ -29,6 +29,16 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
         ];
 
         /// <summary>
+        /// Members that can only be filled by looking up the user's play state for the item.
+        /// </summary>
+        private static readonly string[] _userDataMembers =
+        [
+            nameof(Operand.IsPlayed),
+            nameof(Operand.LastPlayedDate),
+            nameof(Operand.PlayCount)
+        ];
+
+        /// <summary>
         /// Flattens a user's candidate items into the records a playlist is selected and sorted from.
         /// </summary>
         /// <remarks>
@@ -123,10 +133,18 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
                 operand.Studios.Add(studio);
             }
 
-            if (needed is null || needed.Contains(nameof(Operand.IsPlayed)))
+            if (needed is null || Array.Exists(_userDataMembers, needed.Contains))
             {
                 var userData = userDataManager.GetUserData(user, baseItem);
                 operand.IsPlayed = userData is not null && baseItem.IsPlayed(user, userData);
+                operand.PlayCount = userData?.PlayCount ?? 0;
+
+                // Left at zero when never played, which is what lets "not played since X" also pick
+                // up everything never played at all.
+                if (userData?.LastPlayedDate is { } lastPlayed)
+                {
+                    operand.LastPlayedDate = new DateTimeOffset(lastPlayed.ToUniversalTime()).ToUnixTimeSeconds();
+                }
             }
 
             operand.CommunityRating = baseItem.CommunityRating.GetValueOrDefault();

@@ -292,10 +292,7 @@
                     return '<select is="emby-select"' + common + '>' + options(schema.MediaTypes, rule.TargetValue) + '</select>';
                 }
                 if (member.Kind === 'Date') {
-                    // type=date yields YYYY-MM-DD, which the engine normalises for compilation while
-                    // leaving the stored value readable.
-                    var d = /^\d{4}-\d{2}-\d{2}$/.test(rule.TargetValue) ? rule.TargetValue : '';
-                    return '<input is="emby-input" type="date"' + common + 'value="' + esc(d) + '" />';
+                    return dateControl(rule, gi, ri);
                 }
                 if (member.Kind === 'Number') {
                     var attrs = '';
@@ -323,6 +320,95 @@
             // whole name should be typed, which is exactly what regex is for avoiding.
             function isRegexOperator(op) {
                 return op === 'MatchRegex' || op === 'NotMatchRegex';
+            }
+
+            // A date rule can be an offset from now, a calendar date, or a raw timestamp, and those
+            // want different controls. One free-text box would make the common case -- "thirty days
+            // ago" -- something you have to know the syntax for; a date picker alone cannot express an
+            // offset at all. So the mode is chosen first and the inputs follow from it, with an exact
+            // mode kept as the escape hatch for anything the other two cannot say.
+            var dateUnits = [
+                { v: 'h', label: 'hours' },
+                { v: 'd', label: 'days' },
+                { v: 'w', label: 'weeks' },
+                { v: 'm', label: 'months' },
+                { v: 'y', label: 'years' }
+            ];
+
+            function parseDateValue(v) {
+                var rel = /^\s*now\s*(?:([+-])\s*(\d+)\s*([hdwmy]))?\s*$/i.exec(v || '');
+                if (rel) {
+                    return {
+                        mode: 'relative',
+                        dir: rel[1] === '+' ? '+' : '-',
+                        num: rel[2] || '0',
+                        unit: (rel[3] || 'd').toLowerCase()
+                    };
+                }
+                if (/^\d{4}-\d{2}-\d{2}$/.test(v || '')) { return { mode: 'on', date: v }; }
+                return { mode: 'exact', text: v || '' };
+            }
+
+            function pick(id, field, gi, ri, label, list, selected) {
+                var html = '<select is="emby-select" id="' + id + '" aria-label="' + esc(label) + '" ' +
+                    'data-g="' + gi + '" data-r="' + ri + '" data-f="' + field + '" style="margin:0;">';
+                list.forEach(function (o) {
+                    html += '<option value="' + esc(o.v) + '"' + (o.v === selected ? ' selected' : '') +
+                        '>' + esc(o.label) + '</option>';
+                });
+                return html + '</select>';
+            }
+
+            function dateControl(rule, gi, ri) {
+                var p = parseDateValue(rule.TargetValue);
+                var at = '-' + gi + '-' + ri;
+                var html = '<div style="display:flex;flex-wrap:wrap;gap:0.4em;align-items:center;">';
+
+                html += pick('sp-dmode' + at, 'date-mode', gi, ri, 'Kind of date', [
+                    { v: 'relative', label: 'Relative to now' },
+                    { v: 'on', label: 'On a date' },
+                    { v: 'exact', label: 'Exact value' }
+                ], p.mode);
+
+                if (p.mode === 'relative') {
+                    html += '<input is="emby-input" type="number" min="0" step="1" id="sp-dnum' + at + '" ' +
+                        'aria-label="How many" data-g="' + gi + '" data-r="' + ri + '" data-f="date-num" ' +
+                        'style="width:5em;margin:0;" value="' + esc(p.num) + '" />';
+                    html += pick('sp-dunit' + at, 'date-unit', gi, ri, 'Unit', dateUnits, p.unit);
+                    html += pick('sp-ddir' + at, 'date-dir', gi, ri, 'Before or after now', [
+                        { v: '-', label: 'ago' },
+                        { v: '+', label: 'from now' }
+                    ], p.dir);
+                } else if (p.mode === 'on') {
+                    html += '<input is="emby-input" type="date" id="sp-don' + at + '" aria-label="Date" ' +
+                        'data-g="' + gi + '" data-r="' + ri + '" data-f="date-on" style="margin:0;" ' +
+                        'value="' + esc(p.date) + '" />';
+                } else {
+                    // data-f="value" so this writes straight through, the same as any other free-text
+                    // field: this mode exists precisely to accept whatever the other two cannot.
+                    html += '<input is="emby-input" type="text" aria-label="Exact value" ' +
+                        'data-g="' + gi + '" data-r="' + ri + '" data-f="value" autocomplete="off" ' +
+                        'placeholder="2020-07-01 or a Unix timestamp" style="margin:0;" ' +
+                        'value="' + esc(p.text) + '" />';
+                }
+
+                return html + '</div>';
+            }
+
+            // Composed from whichever controls the current mode is showing, rather than stored
+            // piecemeal, so the definition always holds one canonical string.
+            function composeDateValue(gi, ri, mode) {
+                var at = '-' + gi + '-' + ri;
+                if (mode === 'on') {
+                    var on = document.querySelector('#sp-don' + at);
+                    return on && on.value ? on.value : '';
+                }
+                var num = document.querySelector('#sp-dnum' + at);
+                var unit = document.querySelector('#sp-dunit' + at);
+                var dir = document.querySelector('#sp-ddir' + at);
+                var n = parseInt(num && num.value, 10);
+                if (!n || n < 0) { return 'now'; }
+                return 'now' + ((dir && dir.value) || '-') + n + ((unit && unit.value) || 'd');
             }
 
             function renderGroups(dto) {
@@ -583,6 +669,26 @@
                         var op = document.querySelector('#sp-op-' + g + '-' + r);
                         if (op) { op.focus(); }
                     }
+                    return;
+                }
+                // Switching mode reshapes the row, so it seeds a value the new controls can show and
+                // then re-renders. The others just recompose from what is on screen.
+                if (f === 'date-mode') {
+                    rule.TargetValue = t.value === 'exact'
+                        ? ''
+                        : (t.value === 'on'
+                            ? new Date().toISOString().slice(0, 10)
+                            : 'now-30d');
+                    writeDto(dto);
+                    renderBuilder();
+                    var mode = document.querySelector('#sp-dmode-' + g + '-' + r);
+                    if (mode) { mode.focus(); }
+                    return;
+                }
+                if (f === 'date-num' || f === 'date-unit' || f === 'date-dir' || f === 'date-on') {
+                    var kind = document.querySelector('#sp-dmode-' + g + '-' + r);
+                    rule.TargetValue = composeDateValue(+g, +r, kind ? kind.value : 'relative');
+                    writeDto(dto);
                     return;
                 }
                 if (f === 'value') {
