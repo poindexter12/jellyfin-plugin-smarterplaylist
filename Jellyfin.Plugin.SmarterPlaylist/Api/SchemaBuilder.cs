@@ -71,7 +71,9 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
                     MemberKind.Date,
                     ComparisonOperators(),
                     true,
-                    "Accepts a date such as 2020-07-01, treated as UTC, or a raw Unix timestamp. A bare year is rejected.");
+                    "Accepts a date such as 2020-07-01, treated as UTC, a raw Unix timestamp, or an offset from now "
+                    + "such as now-30d. An offset is re-evaluated on every refresh, so it stays a moving window. "
+                    + "Units: h, d, w, m, y. A bare year is rejected.");
             }
 
             if (underlying == typeof(bool))

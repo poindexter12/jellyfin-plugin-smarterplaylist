@@ -292,10 +292,20 @@
                     return '<select is="emby-select"' + common + '>' + options(schema.MediaTypes, rule.TargetValue) + '</select>';
                 }
                 if (member.Kind === 'Date') {
-                    // type=date yields YYYY-MM-DD, which the engine normalises for compilation while
-                    // leaving the stored value readable.
-                    var d = /^\d{4}-\d{2}-\d{2}$/.test(rule.TargetValue) ? rule.TargetValue : '';
-                    return '<input is="emby-input" type="date"' + common + 'value="' + esc(d) + '" />';
+                    // Text rather than type=date: a date rule may hold an offset from now, which a
+                    // native date input cannot represent. The datalist keeps the common offsets one
+                    // click away, and a typed YYYY-MM-DD still works.
+                    var listId = 'sp-when-' + gi + '-' + ri;
+                    return '<input is="emby-input" type="text"' + common +
+                        'list="' + listId + '" autocomplete="off" placeholder="2020-07-01 or now-30d" ' +
+                        'value="' + esc(rule.TargetValue) + '" />' +
+                        '<datalist id="' + listId + '">' +
+                        '<option value="now-7d">a week ago</option>' +
+                        '<option value="now-30d">a month ago</option>' +
+                        '<option value="now-90d">three months ago</option>' +
+                        '<option value="now-1y">a year ago</option>' +
+                        '<option value="now">right now</option>' +
+                        '</datalist>';
                 }
                 if (member.Kind === 'Number') {
                     var attrs = '';

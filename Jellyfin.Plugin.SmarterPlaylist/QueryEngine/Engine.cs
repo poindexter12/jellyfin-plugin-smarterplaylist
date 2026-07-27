@@ -42,6 +42,14 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
         private const double BareYearUpperBound = 9999;
 
         /// <summary>
+        /// Matches a date written relative to the present, such as <c>now</c> or <c>now-30d</c>.
+        /// </summary>
+        private static readonly Regex _relativeDate = new(
+            @"^\s*now\s*(?:([+-])\s*(\d{1,6})\s*([hdwmyHDWMY]))?\s*$",
+            RegexOptions.IgnoreCase,
+            TimeSpan.FromSeconds(1));
+
+        /// <summary>
         /// Gets the members held as Unix seconds, whose rule values may be written as readable dates.
         /// </summary>
         /// <remarks>
@@ -55,7 +63,8 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
             nameof(Operand.DateCreated),
             nameof(Operand.DateLastRefreshed),
             nameof(Operand.DateLastSaved),
-            nameof(Operand.DateModified)
+            nameof(Operand.DateModified),
+            nameof(Operand.LastPlayedDate)
         ];
 
         /// <summary>
@@ -138,6 +147,14 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
                 return rule.TargetValue;
             }
 
+            // Resolved here rather than when the definition is saved, because normalization runs on
+            // every refresh. That is what makes "not played in the last 30 days" a window that moves
+            // with time instead of a fixed date that quietly goes stale.
+            if (TryResolveRelative(rule.TargetValue, out var relative))
+            {
+                return ConvertToUnixTimestamp(relative).ToString(CultureInfo.InvariantCulture);
+            }
+
             if (DateTime.TryParse(rule.TargetValue, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed))
             {
                 return ConvertToUnixTimestamp(parsed).ToString(CultureInfo.InvariantCulture);
@@ -159,8 +176,56 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
             }
 
             throw new ArgumentException(
-                $"Value '{rule.TargetValue}' for date member '{rule.MemberName}' is neither a date nor a Unix timestamp",
+                $"Value '{rule.TargetValue}' for date member '{rule.MemberName}' is neither a date, a Unix timestamp, nor an offset from now such as 'now-30d'",
                 nameof(rule));
+        }
+
+        /// <summary>
+        /// Resolves a value expressed relative to the present, such as <c>now-30d</c>.
+        /// </summary>
+        /// <remarks>
+        /// Accepts <c>now</c> on its own, or <c>now</c> followed by a signed offset and a unit:
+        /// <c>h</c> hours, <c>d</c> days, <c>w</c> weeks, <c>m</c> months, <c>y</c> years. Months and
+        /// years use calendar arithmetic, so <c>now-1m</c> means the same day last month rather than
+        /// thirty days ago.
+        /// </remarks>
+        /// <param name="value">Value to interpret.</param>
+        /// <param name="resolved">The resulting UTC instant, when the value is relative.</param>
+        /// <returns><c>true</c> when the value was a relative expression.</returns>
+        private static bool TryResolveRelative(string value, out DateTime resolved)
+        {
+            resolved = default;
+
+            var match = _relativeDate.Match(value ?? string.Empty);
+            if (!match.Success)
+            {
+                return false;
+            }
+
+            var now = DateTime.UtcNow;
+            if (!match.Groups[1].Success)
+            {
+                resolved = now;
+
+                return true;
+            }
+
+            var amount = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+            if (match.Groups[1].Value == "-")
+            {
+                amount = -amount;
+            }
+
+            resolved = match.Groups[3].Value.ToLowerInvariant() switch
+            {
+                "h" => now.AddHours(amount),
+                "d" => now.AddDays(amount),
+                "w" => now.AddDays(amount * 7),
+                "m" => now.AddMonths(amount),
+                _ => now.AddYears(amount)
+            };
+
+            return true;
         }
 
         /// <summary>

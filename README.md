@@ -20,6 +20,7 @@ older versions.
 - [Writing rules](#writing-rules)
   - [What you can filter on](#what-you-can-filter-on)
   - [Which operators work on which properties](#which-operators-work-on-which-properties)
+  - [Rules that move with time](#rules-that-move-with-time)
   - [Rules that quietly match nothing](#rules-that-quietly-match-nothing)
 - [Combining rules with AND and OR](#combining-rules-with-and-and-or)
 - [The JSON format](#the-json-format)
@@ -143,8 +144,8 @@ A rule is three things: **a property**, **an operator**, and **a value**.
 | **People** | `Actors`, `Directors`, `Writers`, `Producers`, `Composers`, `GuestStars` |
 | **Classification** | `Genres`, `Studios`, `Tags`, `OfficialRating`, `MediaType` |
 | **Ratings** | `CommunityRating` (0–10), `CriticRating` (0–100) |
-| **Dates** | `PremiereDate`, `DateCreated`, `DateLastRefreshed`, `DateLastSaved`, `DateModified` |
-| **Other** | `ProductionYear`, `RunTimeMinutes`, `IsPlayed` |
+| **Dates** | `PremiereDate`, `LastPlayedDate`, `DateCreated`, `DateLastRefreshed`, `DateLastSaved`, `DateModified` |
+| **Other** | `ProductionYear`, `RunTimeMinutes`, `IsPlayed`, `PlayCount` |
 
 `SeriesName`, `SeasonName`, `SeasonNumber` and `EpisodeNumber` are only set on episodes. `Album` is
 only set on audio.
@@ -157,8 +158,8 @@ Which operators are valid depends on the property's type.
 |---|---|---|
 | Text | `Name`, `SeriesName`, `SeasonName`, `MediaType`, `Album`, `FolderPath`, `OfficialRating` | `Equal`, `NotEqual`, `Equals`, `Contains`, `StartsWith`, `EndsWith`, `MatchRegex`, `NotMatchRegex` |
 | List of text | `Actors`, `Composers`, `Directors`, `Genres`, `GuestStars`, `Producers`, `Studios`, `Tags`, `Writers` | `Contains`, `MatchRegex`, `NotMatchRegex` |
-| Number | `CommunityRating`, `CriticRating`, `SeasonNumber`, `EpisodeNumber`, `ProductionYear`, `RunTimeMinutes` | `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual` |
-| Date | `PremiereDate`, `DateCreated`, `DateLastRefreshed`, `DateLastSaved`, `DateModified` | `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual` |
+| Number | `CommunityRating`, `CriticRating`, `SeasonNumber`, `EpisodeNumber`, `ProductionYear`, `RunTimeMinutes`, `PlayCount` | `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual` |
+| Date | `PremiereDate`, `LastPlayedDate`, `DateCreated`, `DateLastRefreshed`, `DateLastSaved`, `DateModified` | `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual` |
 | True/false | `IsPlayed` | `Equal`, `NotEqual` |
 
 Notes:
@@ -168,14 +169,69 @@ Notes:
   *not* match a director named `CGP Grey` — it is not a substring search. Use `MatchRegex` for that.
 - On a **list** property, `MatchRegex` matches if **any** element matches, and `NotMatchRegex` holds
   only if **no** element matches.
-- **Dates** accept a readable date (`"2020-07-01"`, `"2020-07-01T00:00:00Z"`) or a raw Unix
-  timestamp. Readable dates are treated as UTC.
+- **Dates** accept a readable date (`"2020-07-01"`, `"2020-07-01T00:00:00Z"`), a raw Unix timestamp,
+  or an **offset from now** such as `"now-30d"`. Readable dates are treated as UTC. See
+  [Rules that move with time](#rules-that-move-with-time).
 - A **bare year** such as `"2020"` is rejected: it is indistinguishable from a Unix timestamp and
   would silently mean 1970. Write `"2020-01-01"`.
 - `Equal` and `NotEqual` come from the
   [LINQ expression operators](https://docs.microsoft.com/en-us/dotnet/api/system.linq.expressions.expressiontype),
   so any name from that list is accepted — but only the ones above make sense per type.
 - Using an operator a property does not support fails that playlist's refresh and logs the error.
+
+### Rules that move with time
+
+Date rules can be written relative to the present, so a playlist keeps meaning the same thing as
+time passes rather than drifting out of date:
+
+```json
+{ "MemberName": "LastPlayedDate", "Operator": "LessThan", "TargetValue": "now-30d" }
+```
+
+That reads as *"last played more than 30 days ago"*, and it is re-evaluated on every refresh — the
+window moves with you. Written as a fixed date instead, the same rule would slowly stop excluding
+anything.
+
+`now` on its own is the current moment. Offsets are `now` plus or minus an amount and a unit:
+
+| Unit | Means | Example |
+|---|---|---|
+| `h` | hours | `now-6h` |
+| `d` | days | `now-30d` |
+| `w` | weeks | `now-2w` |
+| `m` | months | `now-1m` |
+| `y` | years | `now-1y` |
+
+Months and years use calendar arithmetic, so `now-1m` is the same day last month, not 30 days ago.
+
+**Anything never played counts as long ago.** `LastPlayedDate` is unset for an item you have never
+watched, and an unset value sorts before every cutoff — so `LastPlayedDate LessThan now-30d` selects
+both the things you watched months back *and* everything you have never seen. That is normally what
+you want.
+
+#### Example: a show on shuffle that skips what you just watched
+
+Every episode of the show, minus anything played in the last month:
+
+```json
+{
+  "Name": "M*A*S*H at night",
+  "FileName": "mash_night",
+  "User": "rob",
+  "ExpressionSets": [
+    {
+      "Expressions": [
+        { "MemberName": "SeriesName",     "Operator": "Equal",    "TargetValue": "M*A*S*H" },
+        { "MemberName": "LastPlayedDate", "Operator": "LessThan", "TargetValue": "now-30d" }
+      ]
+    }
+  ],
+  "Order": { "Name": "NoOrder" }
+}
+```
+
+Hit shuffle and it plays from what is left. As episodes age past thirty days they come back into the
+pool on their own.
 
 ### Rules that quietly match nothing
 

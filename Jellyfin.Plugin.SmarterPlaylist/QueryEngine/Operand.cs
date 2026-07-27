@@ -54,6 +54,22 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
         public bool IsPlayed { get; set; }
 
         /// <summary>
+        /// Gets or sets when the owning user last played this item, in Unix seconds, or zero if never.
+        /// </summary>
+        /// <remarks>
+        /// Zero standing in for "never played" is deliberate and useful: a rule looking for items not
+        /// played since some cutoff wants the ones never played at all too, and zero is before every
+        /// cutoff. It does mean "played before 1970" cannot be distinguished from "never played",
+        /// which is not a distinction anything real depends on.
+        /// </remarks>
+        public double LastPlayedDate { get; set; }
+
+        /// <summary>
+        /// Gets or sets how many times the owning user has played this item.
+        /// </summary>
+        public int PlayCount { get; set; }
+
+        /// <summary>
         /// Gets or sets the display name of the item.
         /// </summary>
         public string Name { get; set; } = name;
