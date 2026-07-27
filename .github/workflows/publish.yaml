@@ -97,7 +97,7 @@ jobs:
           # survive -- an update into a new version folder, a container whose plugin directory is
           # reached by a different path -- the image endpoint 404s and the card shows nothing. A file
           # that is simply in the package is already at the path Jellyfin looks for.
-          LOGO="assets/logo.png"
+          LOGO="Jellyfin.Plugin.SmarterPlaylist/bin/Release/net9.0/logo.png"
           test -f "${LOGO}" || { echo "::error::${LOGO} is missing; the catalogue image would break"; exit 1; }
 
           rm -f "${ZIP}"
