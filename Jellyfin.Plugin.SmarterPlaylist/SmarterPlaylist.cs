@@ -115,15 +115,11 @@ namespace Jellyfin.Plugin.SmarterPlaylist
             ArgumentNullException.ThrowIfNull(candidates);
 
             var compiledRules = CompileRuleSets();
-            var results = new List<PlaylistCandidate>();
 
-            foreach (var candidate in candidates)
-            {
-                if (compiledRules.Any(set => set.All(rule => rule(candidate.Operand))))
-                {
-                    results.Add(candidate);
-                }
-            }
+            // A rule set matches when every rule in it does; the sets are OR'd, so one match is enough.
+            var results = candidates
+                .Where(candidate => compiledRules.Any(set => set.All(rule => rule(candidate.Operand))))
+                .ToList();
 
             var ids = Order.OrderBy(results).Take(MaxItems).Select(x => x.Id).ToList();
 

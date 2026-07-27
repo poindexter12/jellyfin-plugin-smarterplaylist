@@ -165,10 +165,10 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
         /// </summary>
         /// <param name="dtos">Every definition on disk.</param>
         /// <returns>The union of referenced members, keyed by the user name a definition names.</returns>
-        private static Dictionary<string, IReadOnlySet<string>> NeededMembersByUser(
+        private static Dictionary<string, HashSet<string>> NeededMembersByUser(
             IEnumerable<SmarterPlaylistDto> dtos)
         {
-            var needed = new Dictionary<string, IReadOnlySet<string>>(StringComparer.Ordinal);
+            var needed = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
 
             foreach (var dto in dtos)
             {
@@ -181,7 +181,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
 
                 foreach (var name in dto.ExpressionSets.SelectMany(s => s.Expressions).Select(e => e.MemberName))
                 {
-                    ((HashSet<string>)members).Add(name);
+                    members.Add(name);
                 }
             }
 
@@ -202,7 +202,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.ScheduleTasks
             SmarterPlaylistDto dto,
             IReadOnlySet<string> needed,
             Dictionary<Guid, IReadOnlyList<PlaylistCandidate>> cache,
-            Dictionary<string, IReadOnlySet<string>> neededByUser)
+            Dictionary<string, HashSet<string>> neededByUser)
         {
             if (cache.TryGetValue(user.Id, out var candidates))
             {
