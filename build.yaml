@@ -16,6 +16,7 @@ owner: "poindexter12"
 imageUrl: "https://raw.githubusercontent.com/poindexter12/jellyfin-plugin-smarterplaylist/main/assets/logo.png"
 artifacts:
   - "Jellyfin.Plugin.SmarterPlaylist.dll"
+  - "logo.png"
 changelog: |-
 
   ### New features and improvements ###

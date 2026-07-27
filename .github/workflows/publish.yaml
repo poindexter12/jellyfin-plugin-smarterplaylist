@@ -91,8 +91,17 @@ jobs:
           DLL="Jellyfin.Plugin.SmarterPlaylist/bin/Release/net9.0/Jellyfin.Plugin.SmarterPlaylist.dll"
           test -f "${DLL}" || { echo "::error::Built DLL not found at ${DLL}"; exit 1; }
 
+          # logo.png ships alongside the DLL so the catalogue image does not depend on Jellyfin
+          # downloading it at install time. That download names the file after the last segment of
+          # imageUrl and records an absolute path to it; when the download or that path does not
+          # survive -- an update into a new version folder, a container whose plugin directory is
+          # reached by a different path -- the image endpoint 404s and the card shows nothing. A file
+          # that is simply in the package is already at the path Jellyfin looks for.
+          LOGO="assets/logo.png"
+          test -f "${LOGO}" || { echo "::error::${LOGO} is missing; the catalogue image would break"; exit 1; }
+
           rm -f "${ZIP}"
-          zip -j "${ZIP}" "${DLL}"
+          zip -j "${ZIP}" "${DLL}" "${LOGO}"
           test -f "${ZIP}" || { echo "::error::Archive ${ZIP} was not created"; exit 1; }
 
           unzip -l "${ZIP}"
