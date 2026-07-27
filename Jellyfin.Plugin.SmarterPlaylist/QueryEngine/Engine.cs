@@ -220,7 +220,10 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
             {
                 "h" => now.AddHours(amount),
                 "d" => now.AddDays(amount),
-                "w" => now.AddDays(amount * 7),
+                // 7.0, not 7: multiplying the int first computes the whole product in int range
+                // before widening, which is the pattern that overflows for large operands even though
+                // the six-digit cap on amount keeps this particular one safe.
+                "w" => now.AddDays(amount * 7.0),
                 "m" => now.AddMonths(amount),
                 _ => now.AddYears(amount)
             };
