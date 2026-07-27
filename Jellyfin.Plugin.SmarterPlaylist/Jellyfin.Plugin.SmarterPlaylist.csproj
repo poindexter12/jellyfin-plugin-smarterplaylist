@@ -37,4 +37,12 @@
     </AssemblyAttribute>
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The catalogue image travels with the plugin rather than being fetched at install time.
+         It has to land in the build output, not just the repository: jprm builds the release
+         archive from every artifact build.yaml lists, and looks for each of them in the publish
+         directory. -->
+    <None Include="../assets/logo.png" Link="logo.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
