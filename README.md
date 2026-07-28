@@ -9,6 +9,11 @@ crew, studios, tags, ratings, dates, runtime, series, play state and more.
 **Requires Jellyfin 10.11.** The plugin is built against the 10.11 server ABI and will not load on
 older versions.
 
+📖 **[Recipes](https://poindexter12.github.io/jellyfin-plugin-smarterplaylist/recipes/)** — complete
+playlist definitions for common goals: a franchise in broadcast order, a night shuffle that skips
+what you just watched, unwatched documentaries, the rewatch pile, and more. This README is the
+reference; the recipes are the worked examples.
+
 ---
 
 ## Contents
