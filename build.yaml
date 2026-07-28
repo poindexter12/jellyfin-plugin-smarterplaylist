@@ -6,7 +6,7 @@ targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Create dynamic playlists from rules"
 description: >
-  SmarterPlaylist lets you create dynamic playlists based on rules and conditions (genre, people, ratings, dates, play state, and more). A scheduled task keeps the generated playlists refreshed automatically.
+  SmarterPlaylist lets you create dynamic playlists based on rules and conditions (genre, people, ratings, dates, play state, and more). A scheduled task keeps the generated playlists refreshed automatically. Worked examples, including a shuffle playlist that skips what you watched recently: https://poindexter12.github.io/jellyfin-plugin-smarterplaylist/recipes/
 
 category: "General"
 owner: "poindexter12"

@@ -8,6 +8,15 @@ Playlists that build themselves from rules you write once.
 This site is for **worked examples**. The [README][readme] is the reference: install, the rule
 builder, every property and operator, the JSON format, troubleshooting.
 
+## Install
+
+Add this as a plugin repository in Jellyfin under *Dashboard → Plugins → Repositories*, then install
+**Smarter Playlist** from the catalogue and restart:
+
+```
+https://raw.githubusercontent.com/poindexter12/jellyfin-plugin-smarterplaylist/main/manifest.json
+```
+
 ## Start here
 
 - **[Recipes](recipes/)** — complete playlist definitions for common goals. Copy one, change the
