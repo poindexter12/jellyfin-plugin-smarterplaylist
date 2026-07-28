@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="jf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#AA5CC3"/>
+      <stop offset="100%" stop-color="#00A4DC"/>
+    </linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#16161c"/>
+      <stop offset="100%" stop-color="#0b0b0f"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#00A4DC" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#00A4DC" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <ellipse cx="660" cy="540" rx="620" ry="520" fill="url(#glow)"/>
+
+  <!-- Playlist mark: three rows that resolve into a funnel, i.e. many items filtered to a list -->
+  <g transform="translate(360 540)">
+    <g fill="url(#jf)">
+      <rect x="-190" y="-186" width="380" height="46" rx="23"/>
+      <rect x="-140" y="-102" width="280" height="46" rx="23" opacity="0.85"/>
+      <rect x="-90"  y="-18"  width="180" height="46" rx="23" opacity="0.7"/>
+    </g>
+    <!-- The spark: what makes the list smart rather than typed out by hand -->
+    <path d="M 92 84 L 122 148 L 186 178 L 122 208 L 92 272 L 62 208 L -2 178 L 62 148 Z"
+          fill="url(#jf)"/>
+    <g fill="url(#jf)" opacity="0.55">
+      <rect x="-190" y="112" width="150" height="34" rx="17"/>
+      <rect x="-190" y="180" width="110" height="34" rx="17"/>
+    </g>
+  </g>
+
+  <text x="700" y="500" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="132" font-weight="700" fill="#ffffff" letter-spacing="-2">Smarter Playlist</text>
+  <text x="706" y="596" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="52" font-weight="400" fill="#9aa0a6">Playlists that build themselves from rules</text>
+  <rect x="706" y="648" width="180" height="8" rx="4" fill="url(#jf)"/>
+  <text x="706" y="742" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="40" font-weight="400" fill="#6b7075">for Jellyfin</text>
+</svg>

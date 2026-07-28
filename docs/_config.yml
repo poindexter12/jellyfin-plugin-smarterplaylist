@@ -8,3 +8,9 @@ permalink: pretty
 exclude:
   - Gemfile
   - Gemfile.lock
+
+# Read by the hand-written meta tags in _layouts/default.html. No plugin reads these, and no
+# plugins: key is declared -- an unloaded Liquid tag is a build failure, not a degraded page.
+url: https://poindexter12.github.io
+repo_url: https://github.com/poindexter12/jellyfin-plugin-smarterplaylist
+readme_url: https://github.com/poindexter12/jellyfin-plugin-smarterplaylist#readme
