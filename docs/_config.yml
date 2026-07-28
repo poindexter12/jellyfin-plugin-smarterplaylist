@@ -1,0 +1,10 @@
+title: Smarter Playlist
+description: Playlists that build themselves from rules, for Jellyfin
+theme: jekyll-theme-cayman
+# Jekyll serves docs/recipes.md as /recipes.html, and does not rewrite links to .md the way the
+# GitHub file browser does. Pretty permalinks keep the published URLs free of that extension, so a
+# link written as recipes/ works both here and when the same file is read on github.com.
+permalink: pretty
+exclude:
+  - Gemfile
+  - Gemfile.lock
