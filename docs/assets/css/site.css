@@ -1,0 +1,193 @@
+/* Smarter Playlist docs.
+   Plain CSS, deliberately: no front matter, so Jekyll serves it as a static asset.
+   The theme key in _config.yml stays as an inert anchor -- this file and _layouts/default.html
+   replace Cayman entirely, because Cayman defines no custom properties, so overriding it for
+   dark mode would have cost more lines than starting from nothing. */
+
+:root {
+  --bg:#fbfcfd; --surface-code:#eef2f6; --border:#dbe3ea;
+  --text:#1b2126; --text-muted:#59646e;
+  --accent:#07698f; --accent-edge:#00a4dc;
+  --tok-key:#0b5a8a; --tok-str:#9b2c2c; --tok-num:#7a4bbd; --tok-punc:#414b55;
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --measure:68ch; --radius:8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#101418; --surface-code:#171d23; --border:#252d35;
+    --text:#e6edf3; --text-muted:#93a1ad;
+    --accent:#58c8f0; --accent-edge:#00a4dc;
+    --tok-key:#7fd4f5; --tok-str:#f0a8a0; --tok-num:#c9aef5; --tok-punc:#9fb0bd;
+  }
+}
+
+*,*::before,*::after { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body {
+  margin:0; background:var(--bg); color:var(--text);
+  font:400 17px/1.65 var(--font-sans);
+  -webkit-text-size-adjust:100%;
+}
+a { color:var(--accent); text-decoration:underline; text-underline-offset:2px; }
+a:hover { text-decoration-thickness:2px; }
+:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:2px; }
+
+#skip { position:absolute; left:-9999px; }
+#skip:focus {
+  position:fixed; top:8px; left:8px; z-index:20; padding:8px 12px;
+  background:var(--bg); border:1px solid var(--accent); border-radius:var(--radius);
+}
+
+/* ---- header ---- */
+.site-header {
+  position:sticky; top:0; z-index:10;
+  background:color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter:saturate(180%) blur(8px);
+  border-bottom:1px solid var(--border);
+}
+.bar {
+  max-width:76rem; margin:0 auto; height:56px; padding:0 24px;
+  display:flex; align-items:center; justify-content:space-between; gap:16px;
+}
+.brand { font-weight:700; font-size:17px; text-decoration:none; color:var(--text); }
+.site-header nav { display:flex; gap:24px; font-size:14px; }
+.site-header nav a { text-decoration:none; color:var(--text-muted); }
+.site-header nav a:hover { color:var(--text); }
+.site-header nav a[aria-current="page"] {
+  color:var(--text); font-weight:700;
+  box-shadow:inset 0 -2px 0 var(--accent-edge);
+}
+
+/* ---- shell ---- */
+.shell { max-width:76rem; margin:0 auto; padding:0 24px; display:block; }
+.prose { max-width:var(--measure); padding:32px 0 64px; }
+.page-title { font-size:28px; line-height:1.2; font-weight:700; margin:0 0 16px; }
+
+/* Bold headings are the fix for "nine recipes look identical": Cayman set h1-h6 to
+   font-weight:normal, so every recipe title rendered at body weight. */
+.prose h2 {
+  font-size:28px; line-height:1.25; font-weight:700; color:var(--text);
+  margin:0 0 8px; scroll-margin-top:72px;
+}
+.prose h3 { font-size:20px; line-height:1.4; font-weight:700; margin:32px 0 8px; }
+.prose p { margin:0 0 16px; }
+.prose > p + .highlight, .prose > p + figure.code { margin-top:16px; }
+.prose hr { border:0; border-top:1px solid var(--border); margin:48px 0; }
+.prose hr + h2 { margin-top:0; }
+.prose blockquote {
+  margin:16px 0; padding:8px 16px; color:var(--text-muted);
+  border-left:3px solid var(--accent-edge);
+}
+.prose ul, .prose ol { margin:0 0 16px; padding-left:24px; }
+.prose li { margin-bottom:4px; }
+.prose code {
+  font:400 15px/1.4 var(--font-mono);
+  background:var(--surface-code); border:1px solid var(--border);
+  border-radius:4px; padding:1px 4px;
+}
+.prose table { border-collapse:collapse; margin:0 0 16px; font-size:15px; }
+.prose th, .prose td { border:1px solid var(--border); padding:6px 12px; text-align:left; }
+.prose th { background:var(--surface-code); font-weight:700; }
+
+/* ---- chip row: the existing index list on recipes.md, restyled in place ---- */
+.page-recipes .prose > ul:first-of-type {
+  list-style:none; margin:24px 0 48px; padding:0;
+  display:flex; flex-wrap:wrap; gap:8px;
+}
+.page-recipes .prose > ul:first-of-type li { margin:0; }
+.page-recipes .prose > ul:first-of-type a {
+  display:block; padding:8px 12px; font-size:14px; text-decoration:none;
+  color:var(--text); background:var(--surface-code);
+  border:1px solid var(--border); border-radius:999px;
+}
+.page-recipes .prose > ul:first-of-type a:hover { border-color:var(--accent-edge); }
+@media (pointer: coarse) {
+  .page-recipes .prose > ul:first-of-type a { padding:12px 16px; }
+}
+
+/* ---- code blocks ---- */
+figure.code { position:relative; margin:16px 0 24px; }
+.prose .highlight, figure.code .highlight {
+  margin:0; background:var(--surface-code);
+  border:1px solid var(--border); border-left:3px solid var(--accent-edge);
+  border-radius:var(--radius); overflow:hidden;
+}
+.prose .highlight pre, .prose pre {
+  margin:0; padding:16px; overflow-x:auto; -webkit-overflow-scrolling:touch;
+  background:transparent; border:0;
+  font:400 14px/1.55 var(--font-mono); color:var(--text); white-space:pre;
+}
+.prose .highlight pre code { background:none; border:0; padding:0; font-size:inherit; }
+@media (min-width: 64em) {
+  figure.code, .prose > .highlight { margin-left:-16px; margin-right:-16px; }
+}
+
+/* Rouge already highlights server-side; these only recolour its existing token spans,
+   which is why highlighting does not depend on JavaScript. */
+.highlight .nl { color:var(--tok-key); font-weight:700; }
+.highlight .s2, .highlight .s, .highlight .s1 { color:var(--tok-str); }
+.highlight .mi, .highlight .mf, .highlight .m { color:var(--tok-num); }
+.highlight .kc { color:var(--tok-num); font-weight:700; }
+.highlight .p, .highlight .o { color:var(--tok-punc); }
+.highlight .w { color:inherit; }
+.highlight .err { color:var(--text); background:rgba(220,60,60,.18); }
+
+/* ---- copy button ---- */
+figure.code .copy {
+  position:absolute; top:8px; right:8px; z-index:2;
+  height:32px; padding:0 12px;
+  font:400 14px/1 var(--font-sans); color:var(--text-muted);
+  background:var(--bg); border:1px solid var(--border);
+  border-radius:var(--radius); cursor:pointer;
+  opacity:0; transition:opacity .12s ease;
+}
+figure.code:hover .copy, figure.code .copy:focus-visible { opacity:1; }
+figure.code .copy:hover { color:var(--text); border-color:var(--accent-edge); }
+figure.code .copy[data-state="done"] { opacity:1; color:var(--accent); border-color:var(--accent); }
+@media (pointer: coarse) { figure.code .copy { opacity:1; height:44px; } }
+
+/* ---- sidebar TOC (JS only) ---- */
+.toc-rail { display:none; }
+@media (min-width: 64em) {
+  .shell { display:grid; grid-template-columns:15rem minmax(0,1fr); gap:48px; }
+  .html-has-toc .toc-rail { display:block; }
+  .toc-rail nav { position:sticky; top:80px; padding:32px 0; font-size:14px; }
+  .toc-rail ul { list-style:none; margin:0; padding:0; }
+  .toc-rail li { margin:0; }
+  .toc-rail a {
+    display:block; padding:4px 12px; color:var(--text-muted); text-decoration:none;
+    border-left:2px solid var(--border);
+  }
+  .toc-rail a:hover { color:var(--text); }
+  .toc-rail a[aria-current="true"] {
+    color:var(--text); font-weight:700; border-left-color:var(--accent-edge);
+  }
+  .html-has-toc.js .page-recipes .prose > ul:first-of-type { display:none; }
+}
+
+/* ---- heading anchors (JS only) ---- */
+.prose h2 .anchor {
+  margin-left:8px; text-decoration:none; color:var(--text-muted);
+  opacity:0; font-weight:400;
+}
+.prose h2:hover .anchor, .prose h2 .anchor:focus-visible { opacity:1; }
+
+/* ---- footer + back to top ---- */
+.site-footer {
+  max-width:76rem; margin:0 auto; padding:24px;
+  border-top:1px solid var(--border); font-size:14px; color:var(--text-muted);
+}
+.to-top {
+  position:fixed; right:16px; bottom:16px; z-index:10;
+  width:44px; height:44px; display:flex; align-items:center; justify-content:center;
+  text-decoration:none; color:var(--text-muted);
+  background:var(--bg); border:1px solid var(--border); border-radius:50%;
+}
+.to-top:hover { color:var(--text); border-color:var(--accent-edge); }
+html.js:not(.is-scrolled) .to-top { display:none; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior:auto; }
+  *,*::before,*::after { transition:none !important; animation:none !important; }
+}
