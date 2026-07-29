@@ -9,9 +9,11 @@ namespace Jellyfin.Plugin.SmarterPlaylist
         /// Gets or sets the name of the sort order to apply.
         /// </summary>
         /// <remarks>
-        /// Recognized values are <c>NoOrder</c>, <c>Release Date Ascending</c>, and
-        /// <c>Release Date Descending</c>. Anything else falls back to <c>NoOrder</c>.
+        /// Recognized values are the names in <see cref="OrderRegistry.Names"/>; anything else falls
+        /// back to <see cref="NoOrder"/>. Deliberately not listed here — this comment named three of
+        /// the four orders for as long as the fourth existed, which is what a second copy of a list
+        /// always ends up doing.
         /// </remarks>
-        public string Name { get; set; } = "NoOrder";
+        public string Name { get; set; } = NoOrder.OrderName;
     }
 }

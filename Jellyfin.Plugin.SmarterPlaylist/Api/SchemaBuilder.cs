@@ -34,13 +34,9 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Api
                 .OrderBy(m => m.Name, StringComparer.Ordinal)
                 .ToList();
 
-            var orders = new[]
-            {
-                NoOrder.OrderName,
-                PremiereDateOrder.OrderName,
-                PremiereDateOrderDesc.OrderName,
-                SeriesEpisodeOrder.OrderName
-            };
+            // Read from the registry rather than listed here, so the page cannot offer an order the
+            // engine does not build, or miss one it does.
+            var orders = OrderRegistry.Names;
             var mediaTypes = Enum.GetNames<Jellyfin.Data.Enums.MediaType>();
 
             // Distinct by name: Contains is registered twice, once for text and once for lists, but the
