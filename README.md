@@ -161,15 +161,20 @@ Which operators are valid depends on the property's type.
 
 | Property type | Properties | Valid operators |
 |---|---|---|
-| Text | `Name`, `SeriesName`, `SeasonName`, `MediaType`, `Album`, `FolderPath`, `OfficialRating` | `Equal`, `NotEqual`, `Equals`, `Contains`, `StartsWith`, `EndsWith`, `MatchRegex`, `NotMatchRegex` |
-| List of text | `Actors`, `Composers`, `Directors`, `Genres`, `GuestStars`, `Producers`, `Studios`, `Tags`, `Writers` | `Contains`, `MatchRegex`, `NotMatchRegex` |
-| Number | `CommunityRating`, `CriticRating`, `SeasonNumber`, `EpisodeNumber`, `ProductionYear`, `RunTimeMinutes`, `PlayCount` | `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual` |
-| Date | `PremiereDate`, `LastPlayedDate`, `DateCreated`, `DateLastRefreshed`, `DateLastSaved`, `DateModified` | `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual` |
+| Text | `Name`, `SeriesName`, `SeasonName`, `Album`, `FolderPath`, `OfficialRating` | `Equal`, `NotEqual`, `Equals`, `Contains`, `StartsWith`, `EndsWith`, `MatchRegex`, `NotMatchRegex`, `AnyOf`, `NoneOf`, `ContainsIgnoreCase`, `IsEmpty`, `IsNotEmpty` |
+| Fixed set | `MediaType` | `Equal`, `NotEqual`, `Equals`, `MatchRegex`, `NotMatchRegex`, `AnyOf`, `NoneOf`, `IsEmpty`, `IsNotEmpty` |
+| List of text | `Actors`, `Composers`, `Directors`, `Genres`, `GuestStars`, `Producers`, `Studios`, `Tags`, `Writers` | `Contains`, `MatchRegex`, `NotMatchRegex`, `AnyOf`, `NoneOf`, `ContainsIgnoreCase`, `NotContains`, `IsEmpty`, `IsNotEmpty` |
+| Number | `CommunityRating`, `CriticRating`, `SeasonNumber`, `EpisodeNumber`, `ProductionYear`, `RunTimeMinutes`, `PlayCount` | `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual`, `Between`, `NotBetween` |
+| Date | `PremiereDate`, `LastPlayedDate`, `DateCreated`, `DateLastRefreshed`, `DateLastSaved`, `DateModified` | `Equal`, `NotEqual`, `GreaterThan`, `GreaterThanOrEqual`, `LessThan`, `LessThanOrEqual`, `Between`, `NotBetween` |
 | True/false | `IsPlayed` | `Equal`, `NotEqual` |
+
+This table is generated from the same operator registry the engine compiles from, so it cannot
+advertise something a refresh would reject.
 
 Notes:
 
-- **Text comparisons are case-sensitive.** `"comedy"` will not match `Comedy`.
+- **Text comparisons are case-sensitive**, unless the operator says otherwise. `"comedy"` will not
+  match `Comedy`; `ContainsIgnoreCase` will.
 - On a **list** property, `Contains` matches a **whole element exactly**. `"Contains": "Grey"` does
   *not* match a director named `CGP Grey` — it is not a substring search. Use `MatchRegex` for that.
 - On a **list** property, `MatchRegex` matches if **any** element matches, and `NotMatchRegex` holds
@@ -179,10 +184,33 @@ Notes:
   [Rules that move with time](#rules-that-move-with-time).
 - A **bare year** such as `"2020"` is rejected: it is indistinguishable from a Unix timestamp and
   would silently mean 1970. Write `"2020-01-01"`.
-- `Equal` and `NotEqual` come from the
-  [LINQ expression operators](https://docs.microsoft.com/en-us/dotnet/api/system.linq.expressions.expressiontype),
-  so any name from that list is accepted — but only the ones above make sense per type.
-- Using an operator a property does not support fails that playlist's refresh and logs the error.
+- Using an operator a property does not support is reported by validation, and fails that playlist's
+  refresh with the valid operators listed in the error.
+
+#### Operators taking more than one value
+
+Three operators read a **comma-separated list** out of `TargetValue`. Write `\,` for a value that
+contains a real comma.
+
+| Operator | Value | Means |
+|---|---|---|
+| `Between` / `NotBetween` | Exactly two: `"1980,1989"` | Inclusive on both bounds. On a date property each bound is resolved separately, so `"now-30d,now"` is a window that still moves with time. |
+| `AnyOf` / `NoneOf` | One or more: `"Action,Thriller"` | Holds when the property matches any of them. On a list property, when any element matches any candidate. |
+
+`IsEmpty` and `IsNotEmpty` take **no** value; whatever `TargetValue` holds is ignored. They find a
+blank text property, or a list property holding nothing — which is how you find items nobody tagged
+or gave an official rating.
+
+```jsonc
+// Nineties films rated 7.5+, as one rule per idea rather than two per range
+{ "MemberName": "ProductionYear",  "Operator": "Between", "TargetValue": "1990,1999" }
+
+// Comedies or documentaries, without needing a separate rule group for each
+{ "MemberName": "Genres",          "Operator": "AnyOf",   "TargetValue": "Comedy,Documentary" }
+
+// Everything nobody has tagged yet
+{ "MemberName": "Tags",            "Operator": "IsEmpty", "TargetValue": "" }
+```
 
 ### Rules that move with time
 
@@ -262,7 +290,9 @@ there**. Start typing and the list narrows.
 - You can still type something not offered — a value may name something not in the library yet.
 - If what you typed is not a value the library holds, the page **says so under the field** instead of
   letting it save quietly and fail later.
-- Values are not offered for `MatchRegex` / `NotMatchRegex`, where the value is a pattern, not a name.
+- Values are not offered for `MatchRegex` / `NotMatchRegex`, where the value is a pattern, not a name,
+  nor for the operators taking a list or a range, where the box holds several values and a comma.
+- `IsEmpty` and `IsNotEmpty` disable the value box altogether, since they take no value.
 
 On a very large library the list is capped; when it is, the page says so rather than implying a
 missing value does not exist.
@@ -398,8 +428,7 @@ all series is close to 900 episodes. **Preview matches** tells you the real numb
     {
       "Expressions": [
         { "MemberName": "MediaType",       "Operator": "Equal",              "TargetValue": "Video" },
-        { "MemberName": "ProductionYear",  "Operator": "GreaterThanOrEqual", "TargetValue": "1990" },
-        { "MemberName": "ProductionYear",  "Operator": "LessThanOrEqual",    "TargetValue": "1999" },
+        { "MemberName": "ProductionYear",  "Operator": "Between",            "TargetValue": "1990,1999" },
         { "MemberName": "CommunityRating", "Operator": "GreaterThanOrEqual", "TargetValue": "7.5" }
       ]
     }
@@ -407,6 +436,9 @@ all series is close to 900 episodes. **Preview matches** tells you the real numb
   "Order": { "Name": "Release Date Ascending" }
 }
 ```
+
+The decade is one rule. Writing it as a `GreaterThanOrEqual` and a `LessThanOrEqual` pair still
+works and means the same thing.
 
 ---
 
@@ -497,8 +529,10 @@ Check the server version. This build requires Jellyfin 10.11 and will not load o
   official rating, tags, runtime and series name have all landed; what is left is whatever Jellyfin
   exposes that nobody has asked for yet.
 - More sorting methods, such as by name, date added, or rating.
-- Custom property types with custom operators. This is the big one — it would mean replacing the
-  reflection-based rule engine with an explicit operator registry.
+- More operators. The reflection-based rule engine has been replaced with an explicit operator
+  registry, so an operator is now one class implementing `IRuleOperator` — the engine, the config
+  page's schema and validation all pick it up from there. Custom property *types* with their own
+  operators are the remaining part of this.
 - Per-user self-service. Definitions are managed by an administrator naming a target user, because a
   plugin configuration page is only reachable from the dashboard. Letting users manage their own
   playlists needs a surface that is not the config page.

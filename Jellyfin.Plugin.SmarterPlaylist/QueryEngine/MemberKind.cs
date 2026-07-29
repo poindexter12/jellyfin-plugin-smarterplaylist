@@ -1,8 +1,14 @@
-namespace Jellyfin.Plugin.SmarterPlaylist.Api
+namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
 {
     /// <summary>
     /// How a filterable member should be presented and which operators apply to it.
     /// </summary>
+    /// <remarks>
+    /// This lives in the query engine rather than the API layer because it is what
+    /// <see cref="Operators.OperatorRegistry"/> keys operator applicability on. The configuration page
+    /// also renders from it, and the member names below are serialized into the schema response, so
+    /// they are a wire contract: renaming one changes the JSON the page switches on.
+    /// </remarks>
     public enum MemberKind
     {
         /// <summary>Free text.</summary>

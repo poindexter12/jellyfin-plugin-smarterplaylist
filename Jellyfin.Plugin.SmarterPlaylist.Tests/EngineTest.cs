@@ -152,12 +152,46 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             Assert.ThrowsAny<ArgumentException>(() => Engine.CompileRule<Operand>(expression));
         }
 
+        // Was MissingMethodException, back when an operator was resolved by looking for a method of
+        // that name on the member's CLR type. There is no method to miss now: the name is either in
+        // the registry for this member's kind or it is not a valid operator at all.
         [Fact]
         public void UnknownOperatorThrows()
         {
             var expression = new Expression("Name", "NoSuchOperator", "x");
 
-            Assert.Throws<MissingMethodException>(() => Engine.CompileRule<Operand>(expression));
+            var ex = Assert.Throws<ArgumentException>(() => Engine.CompileRule<Operand>(expression));
+
+            Assert.Contains("NoSuchOperator", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("StartsWith", ex.Message, StringComparison.Ordinal);
+        }
+
+        // The vocabulary is per member kind, so an operator valid somewhere is still rejected on a
+        // member it does not apply to. Reflection could not express this: Contains resolved against
+        // whatever type the member happened to be, so what was accepted varied by accident.
+        [Fact]
+        public void OperatorValidForAnotherKindIsRejected()
+        {
+            var expression = new Expression("ProductionYear", "StartsWith", "19");
+
+            var ex = Assert.Throws<ArgumentException>(() => Engine.CompileRule<Operand>(expression));
+
+            Assert.Contains("ProductionYear", ex.Message, StringComparison.Ordinal);
+        }
+
+        // The reason the registry exists. Collection<string>.Remove(string) returns bool, so it
+        // type-checked as a predicate and compiled: evaluating the rule removed the value from the
+        // item being tested. Nothing advertised it, but a hand-written definition file reached it.
+        [Theory]
+        [InlineData("Remove")]
+        [InlineData("Add")]
+        [InlineData("Clear")]
+        [InlineData("Insert")]
+        public void MutatingMethodsAreNotOperators(string name)
+        {
+            var expression = new Expression("Genres", name, "Comedy");
+
+            Assert.Throws<ArgumentException>(() => Engine.CompileRule<Operand>(expression));
         }
 
         // Normalization must not touch the caller's rule set. The rules belong to the deserialized

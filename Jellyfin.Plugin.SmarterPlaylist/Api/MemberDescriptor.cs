@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Jellyfin.Plugin.SmarterPlaylist.QueryEngine;
 
 namespace Jellyfin.Plugin.SmarterPlaylist.Api
 {

@@ -72,9 +72,19 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
         // The operator lists are what the README documents and what validation enforces; they must
         // agree with what the engine can actually compile.
         [Fact]
-        public void CollectionMembersOfferOnlyContainsAndRegex()
+        public void CollectionMembersOfferContainsRegexAndSetOperators()
         {
-            Assert.Equal(["Contains", "MatchRegex", "NotMatchRegex"], Member("Genres").Operators);
+            Assert.Equal(
+                ["Contains", "MatchRegex", "NotMatchRegex", "AnyOf", "NoneOf", "ContainsIgnoreCase", "NotContains", "IsEmpty", "IsNotEmpty"],
+                Member("Genres").Operators);
+        }
+
+        // Ordering ones stay out: greater-than over a list of names means nothing.
+        [Fact]
+        public void CollectionMembersOfferNoOrderingOperators()
+        {
+            Assert.DoesNotContain("GreaterThan", Member("Genres").Operators);
+            Assert.DoesNotContain("Between", Member("Genres").Operators);
         }
 
         [Fact]
@@ -98,12 +108,20 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             Assert.Contains("percentage", critic.Notes!, System.StringComparison.Ordinal);
         }
 
-        // Ordering or substring operators against a fixed enum value are meaningless, so the UI
-        // must not offer them.
+        // Ordering and substring operators against a fixed enum value are meaningless, so the UI
+        // must not offer them. Set membership is the exception and the reason this list grew:
+        // "Video or Audio" was previously two rule groups.
         [Fact]
-        public void EnumMembersOfferOnlyEqualityOperators()
+        public void EnumMembersOfferEqualityAndSetOperators()
         {
-            Assert.Equal(["Equal", "NotEqual", "Equals"], Member("MediaType").Operators);
+            var operators = Member("MediaType").Operators;
+
+            Assert.Equal(
+                ["Equal", "NotEqual", "Equals", "MatchRegex", "NotMatchRegex", "AnyOf", "NoneOf", "IsEmpty", "IsNotEmpty"],
+                operators);
+
+            Assert.DoesNotContain("GreaterThan", operators);
+            Assert.DoesNotContain("StartsWith", operators);
         }
 
         [Fact]
@@ -133,11 +151,14 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
         [Fact]
         public void EveryAdvertisedOperatorCompiles()
         {
-            foreach (var member in SchemaBuilder.Build().Members.Where(m => m.Kind != MemberKind.Unsupported))
+            var schema = SchemaBuilder.Build();
+            var arities = schema.Operators.ToDictionary(o => o.Name, o => o.Arity, StringComparer.Ordinal);
+
+            foreach (var member in schema.Members.Where(m => m.Kind != MemberKind.Unsupported))
             {
                 foreach (var op in member.Operators)
                 {
-                    var value = member.Kind switch
+                    var single = member.Kind switch
                     {
                         MemberKind.Boolean => "True",
                         MemberKind.Number => "1",
@@ -145,8 +166,35 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
                         _ => "x"
                     };
 
+                    // The sample has to match the shape the operator expects, or this test would fail
+                    // for every multi-value operator regardless of whether it works.
+                    var value = arities[op] switch
+                    {
+                        "None" => string.Empty,
+                        "Pair" => $"{single},{single}",
+                        "List" => $"{single},{single}",
+                        _ => single
+                    };
+
                     var ex = Record.Exception(() => Engine.CompileRule<Operand>(new Expression(member.Name, op, value)));
                     Assert.True(ex is null, $"{member.Name}/{op} is advertised but failed to compile: {ex?.Message}");
+                }
+            }
+        }
+
+        // The schema must describe every operator it advertises on a member, or the page has no way
+        // to know what input to draw for it.
+        [Fact]
+        public void EveryAdvertisedOperatorIsDescribed()
+        {
+            var schema = SchemaBuilder.Build();
+            var described = schema.Operators.Select(o => o.Name).ToHashSet(StringComparer.Ordinal);
+
+            foreach (var member in schema.Members)
+            {
+                foreach (var op in member.Operators)
+                {
+                    Assert.Contains(op, described);
                 }
             }
         }

@@ -285,6 +285,19 @@
                 var common = ' data-g="' + gi + '" data-r="' + ri + '" data-f="value" id="' + id + '" ';
                 if (!member) { return '<input is="emby-input" type="text"' + common + 'value="' + esc(rule.TargetValue) + '" />'; }
 
+                // Checked before the member's kind, because the operator decides the shape of the
+                // value and the kind only decides how one value is entered.
+                var arity = operatorArity(rule.Operator);
+                if (arity === 'None') {
+                    return '<input is="emby-input" type="text"' + common +
+                        'value="" placeholder="No value needed" disabled />';
+                }
+                if (arity === 'Pair' || arity === 'List') {
+                    return '<input is="emby-input" type="text"' + common +
+                        'placeholder="' + esc(multiValuePlaceholder(member, arity)) + '" ' +
+                        'value="' + esc(rule.TargetValue) + '" />';
+                }
+
                 if (member.Kind === 'Boolean') {
                     return '<select is="emby-select"' + common + '>' + options(['True', 'False'], rule.TargetValue) + '</select>';
                 }
@@ -320,6 +333,34 @@
             // whole name should be typed, which is exactly what regex is for avoiding.
             function isRegexOperator(op) {
                 return op === 'MatchRegex' || op === 'NotMatchRegex';
+            }
+
+            function operatorByName(name) {
+                var list = (schema && schema.Operators) || [];
+                for (var i = 0; i < list.length; i++) {
+                    if (list[i].Name === name) { return list[i]; }
+                }
+                return null;
+            }
+
+            // The member's kind is no longer enough to choose a control. A number member takes a
+            // numeric input for GreaterThan and a free-text one for Between, whose value is two
+            // numbers and a comma; IsEmpty takes no input at all. Arity is what distinguishes them.
+            function operatorArity(op) {
+                var descriptor = operatorByName(op);
+                return descriptor ? descriptor.Arity : 'Single';
+            }
+
+            // Shown in the box so the expected shape is visible before anything is typed, rather than
+            // only afterwards as a validation error.
+            function multiValuePlaceholder(member, arity) {
+                if (arity === 'Pair') {
+                    if (member && member.Kind === 'Date') { return 'now-30d,now'; }
+                    return '1980,1989';
+                }
+                if (member && member.Kind === 'Date') { return 'comma-separated dates'; }
+                if (member && member.Kind === 'Number') { return '1,2,3'; }
+                return 'Action,Thriller';
             }
 
             // A date rule can be an offset from now, a calendar date, or a raw timestamp, and those
@@ -444,6 +485,12 @@
                             'data-g="' + gi + '" data-r="' + ri + '" title="Remove this rule"><span>Remove</span></button>';
                         html += '</div>';
                         html += '<div class="fieldDescription" id="sp-list-' + gi + '-' + ri + '-hint" style="margin:-0.25em 0 0 0;"></div>';
+                        // The operator's own note comes first: it is the one that changes as the row is
+                        // edited, and it is where the syntax for a range or a candidate list is stated.
+                        var opNotes = rule.Operator ? operatorByName(rule.Operator) : null;
+                        if (opNotes && opNotes.Notes) {
+                            html += '<div class="fieldDescription" style="margin:-0.25em 0 0 0;">' + esc(opNotes.Notes) + '</div>';
+                        }
                         if (member && member.Notes) {
                             html += '<div class="fieldDescription" style="margin:-0.25em 0 0.75em 0;">' + esc(member.Notes) + '</div>';
                         }
@@ -660,11 +707,19 @@
                 }
                 if (f === 'op') {
                     var wasRegex = isRegexOperator(rule.Operator);
+                    var wasArity = operatorArity(rule.Operator);
                     rule.Operator = t.value;
+                    // A value entered for one shape is meaningless in another -- "1980,1989" left in a
+                    // numeric box, or a leftover value under an operator that takes none -- and would
+                    // be saved as-is. Clearing is the only reading that cannot silently mislead.
+                    if (wasArity !== operatorArity(t.value)) {
+                        rule.TargetValue = '';
+                    }
                     writeDto(dto);
                     // Switching between a regex and a plain comparison changes whether the value is a
-                    // pattern or a library value, so the control has to change with it.
-                    if (wasRegex !== isRegexOperator(t.value)) {
+                    // pattern or a library value, and switching arity changes the control outright, so
+                    // either has to re-render.
+                    if (wasRegex !== isRegexOperator(t.value) || wasArity !== operatorArity(t.value)) {
                         renderBuilder();
                         var op = document.querySelector('#sp-op-' + g + '-' + r);
                         if (op) { op.focus(); }
