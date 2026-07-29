@@ -156,5 +156,81 @@ namespace Jellyfin.Plugin.SmarterPlaylist.Tests
             Assert.NotEmpty(Errors(Valid(rejected)));
             Assert.NotNull(Record.Exception(() => Engine.CompileRule<Operand>(rejected)));
         }
+
+        // The page's own relative date mode writes these, and the validator called every one of them
+        // "neither a date nor a Unix timestamp" -- it had only DateTime.TryParse to judge by, which
+        // rejects every offset. So the page produced values it then flagged as errors.
+        [Theory]
+        [InlineData("now")]
+        [InlineData("now-30d")]
+        [InlineData("now+1w")]
+        [InlineData("now-6m")]
+        public void RelativeDatesAreAccepted(string value)
+        {
+            Assert.Empty(Errors(Valid(new Expression("LastPlayedDate", "GreaterThan", value))));
+        }
+
+        [Fact]
+        public void ARangeNeedsTwoBounds()
+        {
+            Assert.Contains(Errors(Valid(new Expression("ProductionYear", "Between", "1990"))), d => d.Code == "E15");
+            Assert.Contains(Errors(Valid(new Expression("ProductionYear", "Between", "1,2,3"))), d => d.Code == "E15");
+        }
+
+        // Reversed bounds compile fine and match nothing, so without this the playlist just comes back
+        // empty with no indication why.
+        [Fact]
+        public void ARangeWithItsBoundsReversedIsAnError()
+        {
+            var error = Assert.Single(Errors(Valid(new Expression("ProductionYear", "Between", "1999,1980"))));
+
+            Assert.Equal("E16", error.Code);
+        }
+
+        [Fact]
+        public void ARangeInTheRightOrderIsAccepted()
+        {
+            Assert.Empty(Errors(Valid(new Expression("ProductionYear", "Between", "1980,1999"))));
+        }
+
+        [Fact]
+        public void EachBoundOfADateRangeIsCheckedSeparately()
+        {
+            Assert.Empty(Errors(Valid(new Expression("PremiereDate", "Between", "now-30d,now"))));
+            Assert.Empty(Errors(Valid(new Expression("PremiereDate", "Between", "2020-01-01,2020-12-31"))));
+
+            // A bare year is ambiguous wherever it appears, including inside a range.
+            Assert.Contains(Errors(Valid(new Expression("PremiereDate", "Between", "2020-01-01,2021"))), d => d.Code == "E10");
+        }
+
+        [Fact]
+        public void AStrayCommaInACandidateListIsAnError()
+        {
+            Assert.Contains(Errors(Valid(new Expression("Genres", "AnyOf", "Action,,Thriller"))), d => d.Code == "E17");
+            Assert.Contains(Errors(Valid(new Expression("Genres", "AnyOf", "Action,"))), d => d.Code == "E17");
+        }
+
+        [Fact]
+        public void ACandidateListIsAccepted()
+        {
+            Assert.Empty(Errors(Valid(new Expression("Genres", "AnyOf", "Action,Thriller"))));
+            Assert.Empty(Errors(Valid(new Expression("Genres", "AnyOf", "Lock\\, Stock,Snatch"))));
+        }
+
+        // An operator taking no value must not be judged against the member's type, or IsEmpty on a
+        // date member would be rejected for holding something that is not a date.
+        [Fact]
+        public void OperatorsTakingNoValueAcceptAnEmptyOne()
+        {
+            Assert.Empty(Errors(Valid(new Expression("SeriesName", "IsEmpty", string.Empty))));
+            Assert.Empty(Errors(Valid(new Expression("Genres", "IsNotEmpty", string.Empty))));
+        }
+
+        [Fact]
+        public void AListOperatorStillNeedsSomethingToLookFor()
+        {
+            Assert.Contains(Errors(Valid(new Expression("Genres", "Contains", string.Empty))), d => d.Code == "E13");
+            Assert.Contains(Errors(Valid(new Expression("Genres", "ContainsIgnoreCase", string.Empty))), d => d.Code == "E13");
+        }
     }
 }

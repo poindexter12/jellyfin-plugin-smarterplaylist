@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Text.RegularExpressions;
+using Jellyfin.Plugin.SmarterPlaylist.QueryEngine.Operators;
 
 namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
 {
@@ -17,16 +18,6 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
     /// </remarks>
     public static class Engine
     {
-        /// <summary>
-        /// Name of the pseudo-operator that tests a property against a regular expression.
-        /// </summary>
-        private const string MatchRegexOperator = "MatchRegex";
-
-        /// <summary>
-        /// Name of the pseudo-operator that negates a regular expression test.
-        /// </summary>
-        private const string NotMatchRegexOperator = "NotMatchRegex";
-
         /// <summary>
         /// Lowest numeric value treated as a bare year rather than a Unix timestamp.
         /// </summary>
@@ -147,20 +138,54 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
                 return rule.TargetValue;
             }
 
+            // Multi-value operators hold several dates in one string, so each bound is rewritten on its
+            // own. Normalizing the whole string would leave "now-30d,now" unparseable as a single date
+            // and reject a range that is perfectly well formed.
+            var op = OperatorRegistry.Find(rule.Operator, MemberKind.Date);
+
+            switch (op?.Arity)
+            {
+                case ValueArity.None:
+                    return rule.TargetValue;
+
+                case ValueArity.Pair:
+                case ValueArity.List:
+                    return RuleValueList.Join(
+                        [.. RuleValueList.Split(rule.TargetValue).Select(part => NormalizeDate(part, rule.MemberName))]);
+
+                case null:
+                    // An unrecognised operator; leave the value alone so the failure reported is the
+                    // operator, which is the real problem, rather than a date that never had to parse.
+                    return rule.TargetValue;
+
+                default:
+                    return NormalizeDate(rule.TargetValue, rule.MemberName);
+            }
+        }
+
+        /// <summary>
+        /// Rewrites one date value as Unix seconds.
+        /// </summary>
+        /// <param name="value">Value as written in the rule.</param>
+        /// <param name="memberName">Member the value belongs to, for the error message.</param>
+        /// <returns>The value in Unix seconds.</returns>
+        /// <exception cref="ArgumentException">The value is neither a date nor a Unix timestamp.</exception>
+        private static string NormalizeDate(string value, string memberName)
+        {
             // Resolved here rather than when the definition is saved, because normalization runs on
             // every refresh. That is what makes "not played in the last 30 days" a window that moves
             // with time instead of a fixed date that quietly goes stale.
-            if (TryResolveRelative(rule.TargetValue, out var relative))
+            if (TryResolveRelative(value, out var relative))
             {
                 return ConvertToUnixTimestamp(relative).ToString(CultureInfo.InvariantCulture);
             }
 
-            if (DateTime.TryParse(rule.TargetValue, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed))
+            if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed))
             {
                 return ConvertToUnixTimestamp(parsed).ToString(CultureInfo.InvariantCulture);
             }
 
-            if (double.TryParse(rule.TargetValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var numeric))
+            if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var numeric))
             {
                 // A bare year does not parse as a date, so it would otherwise fall through as a raw
                 // timestamp: "2020" would silently mean 33 minutes after the Unix epoch rather than
@@ -168,17 +193,30 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
                 if (numeric >= BareYearLowerBound && numeric <= BareYearUpperBound)
                 {
                     throw new ArgumentException(
-                        $"Value '{rule.TargetValue}' for date member '{rule.MemberName}' is ambiguous. Write a full date such as '{rule.TargetValue}-01-01' instead of a bare year.",
-                        nameof(rule));
+                        $"Value '{value}' for date member '{memberName}' is ambiguous. Write a full date such as '{value}-01-01' instead of a bare year.",
+                        nameof(value));
                 }
 
-                return rule.TargetValue;
+                return value;
             }
 
             throw new ArgumentException(
-                $"Value '{rule.TargetValue}' for date member '{rule.MemberName}' is neither a date, a Unix timestamp, nor an offset from now such as 'now-30d'",
-                nameof(rule));
+                $"Value '{value}' for date member '{memberName}' is neither a date, a Unix timestamp, nor an offset from now such as 'now-30d'",
+                nameof(value));
         }
+
+        /// <summary>
+        /// Reports whether a value is written relative to the present, such as <c>now-30d</c>.
+        /// </summary>
+        /// <remarks>
+        /// Public so validation can recognise the same forms the engine resolves. Without it, the
+        /// validator has only <see cref="DateTime.TryParse(string, IFormatProvider, DateTimeStyles, out DateTime)"/>
+        /// to go on, which rejects every offset -- so the configuration page's own relative date mode
+        /// produces values its own validator calls errors.
+        /// </remarks>
+        /// <param name="value">Value to inspect.</param>
+        /// <returns><c>true</c> when the value is an offset from now.</returns>
+        public static bool IsRelativeDate(string value) => _relativeDate.IsMatch(value ?? string.Empty);
 
         /// <summary>
         /// Resolves a value expressed relative to the present, such as <c>now-30d</c>.
@@ -253,80 +291,18 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine
         /// <returns>A boolean-valued expression implementing the rule.</returns>
         private static System.Linq.Expressions.Expression BuildExpr<T>(Expression r, ParameterExpression param)
         {
-            var left = System.Linq.Expressions.Expression.Property(param, r.MemberName);
-            var tProp = typeof(T).GetProperty(r.MemberName)?.PropertyType
+            var property = typeof(T).GetProperty(r.MemberName)
                 ?? throw new ArgumentException($"Unknown member '{r.MemberName}' on type '{typeof(T).Name}'", nameof(r));
 
-            // A rule whose operator names a built-in expression type becomes a binary comparison.
-            if (Enum.TryParse(r.Operator, out ExpressionType tBinary))
-            {
-                var right = System.Linq.Expressions.Expression.Constant(Convert.ChangeType(r.TargetValue, tProp, CultureInfo.InvariantCulture));
+            var kind = MemberClassifier.Classify(property);
+            var op = OperatorRegistry.Find(r.Operator, kind)
+                ?? throw new ArgumentException(
+                    $"Operator '{r.Operator}' is not valid for member '{r.MemberName}'. Valid operators: {string.Join(", ", OperatorRegistry.NamesForKind(kind))}",
+                    nameof(r));
 
-                return System.Linq.Expressions.Expression.MakeBinary(tBinary, left, right);
-            }
+            var left = System.Linq.Expressions.Expression.Property(param, property);
 
-            if (r.Operator == MatchRegexOperator || r.Operator == NotMatchRegexOperator)
-            {
-                return BuildRegexExpr(r, left, tProp);
-            }
-
-            // Anything else is a method on the property type, e.g. 'Contains' -> 'operand.Genres.Contains("Comedy")'.
-            var argumentTypes = tProp == typeof(string) ? new[] { typeof(string) } : null;
-            var method = (argumentTypes is null ? tProp.GetMethod(r.Operator) : tProp.GetMethod(r.Operator, argumentTypes))
-                ?? throw new MissingMethodException(tProp.Name, r.Operator);
-            var tParam = method.GetParameters()[0].ParameterType;
-            var methodArg = System.Linq.Expressions.Expression.Constant(Convert.ChangeType(r.TargetValue, tParam, CultureInfo.InvariantCulture));
-
-            return System.Linq.Expressions.Expression.Call(left, method, methodArg);
-        }
-
-        /// <summary>
-        /// Builds the expression tree for a regular-expression rule.
-        /// </summary>
-        /// <remarks>
-        /// String-valued members are matched directly. Members holding a collection of strings are
-        /// matched element-wise, so the rule holds when any single element matches. Matching the
-        /// collection's own <see cref="object.ToString"/> would test the CLR type name instead of
-        /// its contents, which silently never matches.
-        /// </remarks>
-        /// <param name="r">Rule to translate.</param>
-        /// <param name="left">Expression yielding the property being tested.</param>
-        /// <param name="tProp">Type of the property being tested.</param>
-        /// <returns>A boolean-valued expression implementing the rule.</returns>
-        private static System.Linq.Expressions.Expression BuildRegexExpr(Expression r, System.Linq.Expressions.Expression left, Type tProp)
-        {
-            var regex = new Regex(r.TargetValue, RegexOptions.None, TimeSpan.FromSeconds(5));
-            var isMatch = typeof(Regex).GetMethod(nameof(Regex.IsMatch), new[] { typeof(string) })
-                ?? throw new MissingMethodException(nameof(Regex), nameof(Regex.IsMatch));
-            var regexInstance = System.Linq.Expressions.Expression.Constant(regex);
-
-            System.Linq.Expressions.Expression call;
-            if (typeof(IEnumerable<string>).IsAssignableFrom(tProp))
-            {
-                var element = System.Linq.Expressions.Expression.Parameter(typeof(string), "element");
-                var predicate = System.Linq.Expressions.Expression.Lambda<Func<string, bool>>(
-                    System.Linq.Expressions.Expression.Call(regexInstance, isMatch, element),
-                    element);
-                var any = typeof(Enumerable).GetMethods()
-                    .Single(m => m.Name == nameof(Enumerable.Any) && m.GetParameters().Length == 2)
-                    .MakeGenericMethod(typeof(string));
-
-                call = System.Linq.Expressions.Expression.Call(any, left, predicate);
-            }
-            else
-            {
-                var toString = tProp.GetMethod(nameof(ToString), Type.EmptyTypes)
-                    ?? throw new MissingMethodException(tProp.Name, nameof(ToString));
-
-                call = System.Linq.Expressions.Expression.Call(
-                    regexInstance,
-                    isMatch,
-                    System.Linq.Expressions.Expression.Call(left, toString));
-            }
-
-            return r.Operator == NotMatchRegexOperator
-                ? System.Linq.Expressions.Expression.Not(call)
-                : call;
+            return op.Build(new RuleOperatorContext(left, property.PropertyType, kind, r.TargetValue));
         }
     }
 }
