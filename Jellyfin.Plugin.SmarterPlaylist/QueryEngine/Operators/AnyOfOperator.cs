@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using LinqExpression = System.Linq.Expressions.Expression;
 
 namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine.Operators
@@ -45,7 +46,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine.Operators
             ArgumentNullException.ThrowIfNull(context);
 
             var values = LinqExpression.Constant(
-                System.Linq.Enumerable.ToArray(RuleValueList.Split(context.TargetValue)),
+                RuleValueList.Split(context.TargetValue).ToArray(),
                 typeof(IEnumerable<string>));
             var comparer = LinqExpression.Constant(StringComparer.Ordinal, typeof(IEqualityComparer<string>));
 
@@ -59,19 +60,11 @@ namespace Jellyfin.Plugin.SmarterPlaylist.QueryEngine.Operators
         /// <inheritdoc />
         public override RuleValueProblem? ValidateValue(string targetValue, MemberKind kind)
         {
-            var parts = RuleValueList.Split(targetValue);
-
-            foreach (var part in parts)
-            {
-                if (string.IsNullOrEmpty(part))
-                {
-                    return new RuleValueProblem(
-                        "E17",
-                        $"{Name} was given an empty value in '{targetValue}'. Remove the stray comma, or write \\, for a literal one.");
-                }
-            }
-
-            return null;
+            return RuleValueList.Split(targetValue).Any(string.IsNullOrEmpty)
+                ? new RuleValueProblem(
+                    "E17",
+                    $"{Name} was given an empty value in '{targetValue}'. Remove the stray comma, or write \\, for a literal one.")
+                : null;
         }
     }
 }
