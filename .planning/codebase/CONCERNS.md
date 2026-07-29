@@ -1,16 +1,18 @@
 # Codebase Concerns
 
 **Analysis Date:** 2026-07-25
+**Last revised:** 2026-07-29 — the configuration page, HTTP API, validation layer and operator registry all landed after the original audit, which invalidated several entries below. Each was re-checked against the code rather than assumed still true.
 
 Every item below was verified against the code in this repository. Items marked **CONFIRMED BY TEST** were reproduced with an executable check rather than inferred by reading.
 
 ## Tech Debt
 
-**Store API is largely dead code:**
-- Issue: Three of the five `ISmarterPlaylistStore` members have no callers anywhere in the repo. Only `GetAllSmarterPlaylistsAsync` and `SaveAsync` are used, both from the scheduled task.
+**Store API is partly dead code (revised 2026-07-29):**
+- Issue: two of the five `ISmarterPlaylistStore` members still have no callers anywhere in the repo — `GetSmarterPlaylistAsync(Guid)` and `LoadPlaylistsAsync(Guid userId)`. Both are keyed by `Guid`, which is the API shape the plugin turned out not to want.
 - Files: `Jellyfin.Plugin.SmarterPlaylist/ISmarterPlaylistStore.cs`, `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistStore.cs`
-- Impact: Unused surface implies capability that does not exist (notably `Delete`, which nothing ever invokes, so definitions are never cleaned up by the plugin).
-- Fix approach: Either delete `GetSmarterPlaylistAsync`, `LoadPlaylistsAsync`, and `Delete`, or wire them to a real caller once a management surface exists.
+- Resolved since the audit: `Delete` is now called by `SmarterPlaylistController.cs:551`, so definitions are cleaned up through the config page. `GetAllSmarterPlaylistsAsync` and `SaveAsync` are used by the scheduled task and `PlaylistSynchronizer`.
+- Impact: unused surface implies capability that does not exist. `LoadPlaylistsAsync(userId)` is the more misleading of the two, since it also ignores its argument — see the partitioning entry below.
+- Fix approach: delete both. The management surface that arrived addresses definitions by file name, not `Guid`, so nothing is waiting on them.
 
 **Per-user partitioning is implied but not implemented:**
 - Issue: `GetSmarterPlaylistFilePaths(string userId)` and `GetSmarterPlaylistPath(string userId, string playlistId)` accept a `userId` and ignore it entirely. All definitions live flat in one directory keyed only by file name.
@@ -18,11 +20,11 @@ Every item below was verified against the code in this repository. Items marked 
 - Impact: Two users cannot own same-named definitions, and `LoadPlaylistsAsync(userId)` would return every user's playlists rather than that user's. Ownership lives only inside each file's `User` field.
 - Fix approach: Either partition into `<BasePath>/<userId>/` subdirectories, or drop the parameters so the API stops lying about its behavior.
 
-**Store is constructed rather than injected:**
-- Issue: `RefreshAllPlaylists` news up `SmarterPlaylistStore` and `SmarterPlaylistFileSystem` in its own constructor instead of receiving `ISmarterPlaylistStore` from DI.
-- Files: `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs`
-- Impact: The task cannot be unit tested against a fake store, which is why there is currently no test coverage of the refresh flow at all. CA1859 also forces the field to be typed as the concrete class.
-- Fix approach: Register `ISmarterPlaylistStore`/`ISmarterPlaylistFileSystem` via an `IPluginServiceRegistrator` and inject them.
+**Store is constructed rather than injected — FIXED:**
+- Issue: `RefreshAllPlaylists` newed up `SmarterPlaylistStore` and `SmarterPlaylistFileSystem` in its own constructor instead of receiving `ISmarterPlaylistStore` from DI, so the task could not be tested against a fake store.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/PluginServiceRegistrator.cs`, `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs`
+- Resolution: `PluginServiceRegistrator` registers `ISmarterPlaylistStore`, `ISmarterPlaylistFileSystem`, `IRefreshStatusStore`, `IPlaylistCoverStore`, `IPlaylistCoverService` and `IPlaylistSynchronizer`; the task takes all six of its collaborators as constructor parameters.
+- Residual: the refresh flow is still not covered end to end, but it is no longer *blocked* on this — see Test Coverage Gaps.
 
 **Template leftovers in repo configuration — FIXED 2026-07-25:**
 - Issue: `scan-codeql.yaml` **and** `changelog.yaml` both passed `repository-name: jellyfin/jellyfin-plugin-template` instead of this repository, so CodeQL results and generated changelogs were attributed to the wrong name. `README.md` linked to `blob/master` while the default branch is `main`, so the `Operand` link 404'd.
@@ -30,11 +32,10 @@ Every item below was verified against the code in this repository. Items marked 
 - Resolution: Both corrected. The sibling leftovers in `build.yaml` — placeholder overview, description, and changelog — were corrected during the 10.11 migration.
 - Watch for: Other `@master` references in `.github/workflows/` are **correct** — they pin the upstream `jellyfin/jellyfin-meta-plugins` reusable workflows, whose default branch really is `master`. Do not "fix" those.
 
-**No plugin configuration page:**
-- Issue: `Plugin` previously implemented `IHasWebPages` but returned a single `PluginPageInfo` with its `EmbeddedResourcePath` commented out, registering an empty page. The interface has been removed rather than left as a broken stub.
-- Files: `Jellyfin.Plugin.SmarterPlaylist/Plugin.cs`
-- Impact: All configuration is hand-edited JSON; there is no in-server UI.
-- Fix approach: Re-add `IHasWebPages` together with a real embedded HTML resource when a config UI is actually built.
+**No plugin configuration page — FIXED:**
+- Issue: `Plugin` previously implemented `IHasWebPages` but returned a single `PluginPageInfo` with its `EmbeddedResourcePath` commented out, registering an empty page. The interface was removed rather than left as a broken stub.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/Plugin.cs`, `Jellyfin.Plugin.SmarterPlaylist/Configuration/configPage.html`
+- Resolution: `Plugin` implements `IHasWebPages` again (`Plugin.cs:14`) and `GetPages` returns a real embedded resource. The page is backed by `SmarterPlaylistController`, which serves the schema and offers list, read, create, update, delete, validate, preview and field-value endpoints.
 
 ## Known Bugs
 
@@ -43,7 +44,7 @@ Every item below was verified against the code in this repository. Items marked 
 - Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylist.cs`, `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistDto.cs`
 - Cause: The value was parsed, defaulted to `DefaultMaxItems` (1000), and exposed as a property, but `FilterPlaylistItems` never applied a `Take`. The field was also absent from the README, so it was both non-functional and undocumented.
 - Resolution: `FilterPlaylistItems` now applies `.Take(MaxItems)` after ordering, so the cap keeps the first N in the chosen sort order. `MaxItems` is now documented in `README.md`.
-- Residual risk: The cap itself is **not** covered by a test, because `FilterPlaylistItems` requires `ILibraryManager`/`IUserDataManager` doubles. Only the DTO-to-model mapping is asserted. See Test Coverage Gaps.
+- Residual risk: none remaining. The cap was untested at the time of the audit because `FilterPlaylistItems` required `ILibraryManager`/`IUserDataManager` doubles; it now takes flattened `PlaylistCandidate` records and is covered by `FilterAndOrderTest`. See *`MaxItems` enforcement — CLOSED 2026-07-26* under Test Coverage Gaps.
 
 **`MatchRegex`/`NotMatchRegex` were broken on collection properties — FIXED 2026-07-25:**
 - Symptoms: `MatchRegex` against `Directors`, `Genres`, `Actors`, `Composers`, `GuestStars`, `Producers`, or `Studios` never matched. `NotMatchRegex` against those same properties matched every item.
@@ -67,7 +68,7 @@ Every item below was verified against the code in this repository. Items marked 
 **Malformed definitions failed without naming the file — FIXED 2026-07-25:**
 - Symptoms: A JSON typo surfaced as a raw `JsonException` citing only a byte offset, with no indication of which file was at fault — while aborting the refresh of every other playlist.
 - Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistStore.cs`
-- Resolution: wrapped in an `InvalidOperationException` naming the file path. Note this only improves diagnosis; the blast-radius problem below is the real fix and is still open.
+- Resolution: wrapped in an `InvalidOperationException` naming the file path. This only improved diagnosis; the blast-radius problem was fixed separately — see *One bad definition aborted every other playlist's refresh* below.
 
 **Date rules corrupted their own definition file — FIXED 2026-07-25:**
 - Symptoms: A `PremiereDate` rule written as a readable date worked on the first refresh, then permanently aborted **every** playlist's refresh on all subsequent runs.
@@ -94,8 +95,29 @@ Every item below was verified against the code in this repository. Items marked 
 **FileName allowed path traversal — FIXED 2026-07-25:**
 - Risk: `SmarterPlaylistDto.FileName` is user-supplied and became the file name unchecked in `GetSmarterPlaylistPath`, so a definition could be written outside `BasePath`.
 - Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistFileSystem.cs`
-- Resolution: empty names and anything containing a path separator are now rejected. Covered by `SmarterPlaylistFileSystemTest`.
-- Escalation risk was limited today (writing a definition already requires access to the data directory), but this becomes externally reachable the moment the planned config page exposes `FileName` over HTTP.
+- Resolution: empty names and anything containing a path separator are now rejected (`SmarterPlaylistFileSystem.cs:70`, `Path.GetFileName(playlistId) != playlistId`). Covered by `SmarterPlaylistFileSystemTest`.
+- **The escalation path this anticipated is now live.** `SmarterPlaylistController` takes `fileName` from the route on `GET`/`PUT`/`DELETE Definitions/{fileName}`, so the guard is load-bearing rather than defence in depth. Do not weaken it, and do not add a second path-building route that bypasses it.
+
+**A list operator could mutate the item it was testing — FIXED 2026-07-29:**
+- Symptoms: A rule such as `{"MemberName": "Genres", "Operator": "Remove", "TargetValue": "Comedy"}` compiled successfully and removed the value from the operand while evaluating it.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Engine.cs` (`BuildExpr`)
+- Cause: an operator was resolved with `tProp.GetMethod(r.Operator)`, so the accepted vocabulary was whatever the member's CLR type exposed. `Collection<string>.Remove(string)` returns `bool`, which type-checks as a predicate.
+- **CONFIRMED BY TEST** against the pre-fix code: `Remove compiled. result=True genresAfter=[Drama]` from a starting `[Comedy, Drama]`. `Clear` threw `IndexOutOfRangeException` from `GetParameters()[0]`; `CompareTo` threw `ArgumentException` on the `int` return.
+- Severity: bounded. `Operand` is a per-refresh projection, so the mutation could not reach the library or the definition file — a robustness bug, not a security one. Nothing advertised these operators, but a hand-written definition reached them directly and the config page's validation could not flag what its schema never listed.
+- Resolution: operators are now declared in `OperatorRegistry` rather than reflected. Covered by `EngineTest.MutatingMethodsAreNotOperators` for `Remove`, `Add`, `Clear` and `Insert`.
+
+**Validation rejected the relative dates the config page itself produced — FIXED 2026-07-29:**
+- Symptoms: `now-30d` — exactly what the page's own relative date mode writes — was reported as `E09: 'now-30d' is neither a date nor a Unix timestamp`.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/Api/DefinitionValidator.cs`, `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Engine.cs`
+- Cause: the validator judged date values with `DateTime.TryParse` and a numeric fallback, neither of which recognises an offset. The engine had `_relativeDate` for exactly this but kept it private, so the two components disagreed about what a date is.
+- **CONFIRMED BY TEST** against the pre-fix code in a throwaway worktree: `BASELINE E09: 'now-30d' is neither a date nor a Unix timestamp.`
+- Resolution: `Engine.IsRelativeDate` is public and both callers use it. Covered by `DefinitionValidatorTest.RelativeDatesAreAccepted`.
+- Note: the bug existed from the moment relative dates shipped (#31) and survived a release, because no validator test covered the syntax the feature added.
+
+**One bad definition aborted every other playlist's refresh — FIXED:**
+- Symptoms: A single unknown member, bad operator or unparseable date froze every other playlist, since the exception propagated out of the per-definition loop and ended the task run.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs`
+- Resolution: each definition is now synchronized inside a `try`/`catch` that excludes only `OperationCanceledException`, logs the failure against the definition's name, and records a `RefreshOutcome.Failed` status. The breadth of the catch is deliberate and documented at the call site: the failure modes are open-ended, and narrowing it would let an unanticipated exception type reintroduce the bug.
 
 ## Security Considerations
 
@@ -107,9 +129,9 @@ Every item below was verified against the code in this repository. Items marked 
 
 **Runtime expression compilation:**
 - Risk: `Engine.CompileRule` calls `Compile(true)`, emitting IL from user-controlled member names and operator names.
-- Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Engine.cs`
-- Current mitigation: Member and operator names are resolved by reflection against `Operand` only, so an invalid name throws (`ArgumentException` / `MissingMethodException`) rather than executing arbitrary code. The surface is bounded by `Operand`'s properties.
-- Recommendations: Acceptable as-is. Note that `Compile(true)` forces a dynamic assembly, which is unavailable under full AOT should Jellyfin ever move that way.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Engine.cs`, `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Operators/OperatorRegistry.cs`
+- Current mitigation (revised 2026-07-29): member names are still resolved by reflection against `Operand`, so the member surface is bounded by its properties. **Operator names no longer are.** They are looked up in `OperatorRegistry` keyed by name *and* member kind, and an unmatched name throws `ArgumentException` naming the valid alternatives. Previously the operator surface was every method on the member's CLR type — see the mutating-method bug above.
+- Recommendations: Acceptable as-is, and materially narrower than before. Note that `Compile(true)` forces a dynamic assembly, which is unavailable under full AOT should Jellyfin ever move that way.
 
 **Definitions are read from a server-writable directory:**
 - Risk: Anyone who can write to `<DataPath>/SmarterPlaylists/` controls which user each playlist targets, since ownership is just the `User` string in the file.
@@ -119,17 +141,16 @@ Every item below was verified against the code in this repository. Items marked 
 
 ## Performance Bottlenecks
 
-**Full library scan per playlist, per run:**
-- Problem: Every refresh enumerates the entire user-visible library once per playlist definition.
-- Files: `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs` (`GetAllUserMedia`, called inside the per-playlist loop)
-- Cause: `GetAllUserMedia` issues an unfiltered recursive `InternalItemsQuery` for `Audio`, `Episode`, and `Movie`, and is invoked once per definition rather than once per user.
-- Improvement path: Group definitions by user and fetch the item set once per user per run.
+**Full library scan per playlist, per run — FIXED:**
+- Problem: every refresh enumerated the entire user-visible library once per playlist definition rather than once per user.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs` (`CandidatesFor`)
+- Resolution: candidates are memoized in a `candidatesByUser` dictionary keyed by user id and built once per user per run. `NeededMembersByUser` first computes the union of members every one of that user's definitions reads, so the single fetch is projected once with everything any of them will need — rather than per definition with only its own.
 
-**Operand construction hits the library per item:**
-- Problem: `OperandFactory.GetMediaType` calls `ILibraryManager.GetPeople(baseItem)` for every candidate item, for every playlist.
+**Operand construction hits the library per item — FIXED:**
+- Problem: `OperandFactory` called `ILibraryManager.GetPeople(baseItem)` for every candidate item, for every playlist, even when no rule referenced a person.
 - Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/OperandFactory.cs`
-- Cause: People are resolved eagerly even when no rule in the definition references a person property.
-- Improvement path: Inspect the compiled rule set for person-property usage and skip the lookup when unused, or memoize per item across definitions in a single run.
+- Resolution: projection takes a `needed` set of member names. `GetPeople` runs only when `needed` intersects `_peopleMembers`, and the user-data lookup only when it intersects `_userDataMembers`. Passing `null` still fills everything, which is what keeps the factory usable outside the refresh path.
+- Watch for: a new `Operand` member sourced from people or user data must be added to `_peopleMembers` / `_userDataMembers`, or it silently projects as empty whenever a rule reads it alone. The member lists are the coupling that makes this optimisation correct, and nothing enforces them.
 
 **Rules recompiled every run:**
 - Problem: Expression trees are rebuilt and JIT-compiled on each execution.
@@ -139,11 +160,18 @@ Every item below was verified against the code in this repository. Items marked 
 
 ## Fragile Areas
 
-**Reflection-driven rule engine:**
-- Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Engine.cs`, `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Operand.cs`
-- Why fragile: `Operand`'s property names and CLR types are the plugin's public contract, bound by string from user JSON with no compile-time link. Renaming a property, or changing its type, silently breaks every playlist file using it. Which operators are legal is an emergent consequence of the property's type rather than anything declared.
-- Safe modification: Add properties freely; never rename or retype an existing one without a migration. `EngineTest.cs` pins the operator-per-type behavior — run it after any change here.
-- Test coverage: Good since the 10.11 migration (operator/type matrix, unknown member, unknown operator, date rewriting).
+**`Operand` is a string-bound public contract (revised 2026-07-29):**
+- Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Operand.cs`, `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/MemberClassifier.cs`
+- Why fragile: `Operand`'s property names and CLR types are the plugin's public contract, bound by string from user JSON with no compile-time link. Renaming a property, or changing its type, silently breaks every playlist file using it — and retyping one now also silently changes which operators the member offers, since `MemberClassifier` derives the kind from the CLR type.
+- **No longer fragile:** which operators are legal used to be an emergent consequence of the property's type. It is now declared in `OperatorRegistry`, and adding a member to `Engine.DateMembers` or changing a type moves a member between declared vocabularies rather than into an undeclared one.
+- Safe modification: Add properties freely; never rename or retype an existing one without a migration. `SchemaBuilderTest.EveryAdvertisedOperatorCompiles` fails if a type change leaves the schema advertising something the engine rejects.
+- Test coverage: Good (operator/kind matrix, unknown member, unknown operator, operator valid for another kind, date rewriting, mutating methods rejected).
+
+**Operator arity is encoded in a single string field:**
+- Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Operators/RuleValueList.cs`, `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Operators/ValueArity.cs`
+- Why fragile: `Between`, `AnyOf` and `NoneOf` pack several values into the one `TargetValue` string, comma-separated with `\,` as the escape. This was chosen over adding a `TargetValues` array so that no existing definition file or DTO changed shape, but it means a value containing a real comma depends on the author knowing to escape it. `AnyOfOperator.ValidateValue` catches the empty-part case (`E17`); it cannot catch a genre legitimately named with a comma that the user did not escape — that silently becomes two candidates matching nothing.
+- Safe modification: Any new multi-value operator must declare its `Arity` and go through `RuleValueList`, never split the string itself. The config page reads arity from `SchemaResponse.Operators` to pick its control, so an operator that lies about its arity renders the wrong input.
+- Test coverage: Good for splitting, joining, round-tripping and escaping (`OperatorRegistryTest`). No test asserts what happens to an *unescaped* comma, because the behaviour is ambiguous by construction rather than wrong.
 
 **DTO/JSON binding contract:**
 - Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistDto.cs`, `Jellyfin.Plugin.SmarterPlaylist/ExpressionSet.cs`
@@ -152,24 +180,24 @@ Every item below was verified against the code in this repository. Items marked 
 - Test coverage: Good — deserialization, round-trip, and missing-collection defaults are all covered.
 
 **Playlist entry removal reimplemented a working platform API — FIXED 2026-07-25:**
-- Files: `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs`
+- Files: `Jellyfin.Plugin.SmarterPlaylist/PlaylistSynchronizer.cs` (moved out of `ScheduleTasks/RefreshAllPlaylists.cs` since the audit)
 - Why it was fragile: A private `RemoveFromPlaylist` reached past the public API, rewriting `playlist.LinkedChildren` directly and calling `UpdateToRepositoryAsync` itself. A source comment justified this: *"Real PlaylistManagers RemoveFromPlaylist needs an entry ID which seems to not work."*
 - Root cause (verified against Jellyfin v10.11.11 `Emby.Server.Implementations/Playlists/PlaylistManager.cs`): that diagnosis was wrong. `IPlaylistManager.RemoveItemFromPlaylistAsync(string playlistId, IEnumerable<string> entryIds)` matches on `i.Item1.ItemId?.ToString("N", CultureInfo.InvariantCulture)` — the **undashed** id format. The plugin was passing dashed (`"D"`) ids, so nothing ever matched, and the author concluded the API was broken rather than that the format was wrong. Jellyfin's implementation was otherwise line-for-line what the plugin hand-rolled.
 - Resolution: `RemoveFromPlaylist` deleted; the refresh now calls `_playlistManager.RemoveItemFromPlaylistAsync` with ids formatted via `ToString("N", CultureInfo.InvariantCulture)`. This also removed the `IFileSystem` and `IProviderManager` constructor dependencies, since Jellyfin queues the metadata refresh internally — the task now takes six injected services instead of eight.
 - Residual risk: Still untested end to end. The `"N"` format requirement is load-bearing and invisible — passing the dashed form silently removes nothing, leaving stale items in the playlist. A code comment records this at the call site.
 
 **Playlist id format is load-bearing and undocumented:**
-- Files: `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs` (`FindPlaylists`, `CreateNewPlaylistAsync`)
+- Files: `Jellyfin.Plugin.SmarterPlaylist/PlaylistSynchronizer.cs` (moved out of `ScheduleTasks/RefreshAllPlaylists.cs` since the audit; the `"N"` requirement is recorded in a comment at `PlaylistSynchronizer.cs:116`)
 - Why fragile: `FindPlaylists` compares `playlist.Id.ToString()` with dashes stripped against the definition's stored `Id`. This is **correct** — Jellyfin's `CreatePlaylist` returns `playlist.Id.ToString("N")`, so stored ids are undashed — but nothing in the code states that invariant. A future edit that stores a dashed id, or drops the `Replace`, would silently stop matching and make the plugin create a duplicate playlist on every run.
 - Safe modification: Parse both sides as `Guid` and compare, which is format-agnostic and self-documenting.
 - Test coverage: None.
 
 ## Scaling Limits
 
-**Library size:**
+**Library size (revised 2026-07-29):**
 - Current capacity: Fine for typical personal libraries.
-- Limit: Cost is O(definitions x library items) per run against a default 30-minute trigger. A large library combined with many definitions will keep the task running continuously.
-- Scaling path: Batch the library fetch per user (see Performance), then consider incremental refresh driven by library-change events instead of a fixed interval.
+- Limit: cost is now O(users x library items) for the fetch plus O(definitions x candidates) for evaluation, against a default 30-minute trigger. The fetch — the expensive half — was O(definitions x library items) at the time of the audit.
+- Scaling path: the per-user batching this entry called for has landed (see Performance). What remains is incremental refresh driven by library-change events rather than a fixed interval, which is the only thing that removes the repeated full scan entirely.
 
 **Playlist definition count:**
 - Current capacity: All definitions are loaded and deserialized concurrently on every run via `Task.WhenAll`.
@@ -195,32 +223,35 @@ Every item below was verified against the code in this repository. Items marked 
 
 ## Missing Critical Features
 
-**No way to manage playlists from the server UI:**
-- Problem: Definitions are hand-written JSON files placed in a data directory. There is no configuration page, no API, and no validation feedback.
-- Blocks: Non-technical use entirely. Also means malformed JSON surfaces only as a task failure in the server log.
+**No way to manage playlists from the server UI — DELIVERED:**
+- Problem was: definitions were hand-written JSON files in a data directory, with no configuration page, no API and no validation feedback.
+- Now: `configPage.html` is a visual rule builder — property, operator and value as dropdowns with AND/OR groups — over `SmarterPlaylistController` (schema, list, read, create, update, delete, validate, preview, field values). Value pickers are drawn from the target user's real library.
+- Residual: the page is reachable only from the dashboard, so definitions are still administered by someone naming a target user. Per-user self-service remains open and is the README's last future-work item.
 
-**No validation of definitions:**
-- Problem: `SmarterPlaylist` has no validation step; a bad member or operator name throws only when the rule is compiled, mid-run.
-- Blocks: Useful error reporting. A single malformed definition throws out of `RefreshPlaylistAsync` and aborts the entire task run, so one bad file stops every other playlist from refreshing.
+**No validation of definitions — DELIVERED:**
+- Problem was: `SmarterPlaylist` had no validation step, so a bad member or operator name threw only when the rule was compiled, mid-run.
+- Now: `DefinitionValidator` produces coded diagnostics (`E01`–`E17`, `W01`) on demand via `POST Validate`, ahead of any refresh. Operator-specific value checks are delegated to the operator itself, so the validator no longer holds a second, always-incomplete copy of what each one accepts.
+- Residual: validation is advisory at the HTTP layer. A definition written straight to disk is still only checked when it compiles — which is now survivable, since one failure no longer aborts the run.
 
-**Limited filterable properties and sort orders:**
-- Problem: `Operand` exposes ~20 properties; `BaseItem` offers many more that users would reasonably want (`ProductionYear`, `OfficialRating`, `Tags`, `RunTimeTicks`, `SeriesName`). Only three sort orders exist.
-- Blocks: Both are listed in the README's future work and are cheap to extend — a new `Operand` property is picked up by the engine automatically, and a new order is one file plus one switch arm.
+**Limited filterable properties and sort orders (revised 2026-07-29):**
+- Properties: largely addressed. Every field the original audit named has landed — `ProductionYear`, `OfficialRating`, `Tags`, `RunTimeMinutes` and `SeriesName` are all on `Operand`, alongside `SeasonName`, `SeasonNumber`, `EpisodeNumber`, `LastPlayedDate` and the four `Date*` members. What remains is whatever Jellyfin exposes that nobody has asked for.
+- Operators: addressed. Seven landed with the registry (`Between`/`NotBetween`, `AnyOf`/`NoneOf`, `ContainsIgnoreCase`, `NotContains`, `IsEmpty`/`IsNotEmpty`), and adding another is now one class implementing `IRuleOperator` — picked up by the engine, the schema and validation together.
+- **Sort orders are the part still genuinely limited:** four exist (`NoOrder`, `Release Date Ascending`, `Release Date Descending`, `Series, Season, Episode`). Sort by name, date added and rating are all still missing.
+- Orders are where operators used to be, and are worth a registry for the same reason. A new order needs a class, an arm in `SmarterPlaylist.cs:41`'s `switch`, **and** an entry in `SchemaBuilder`'s hand-written `orders` array. Miss the switch arm and the page offers an order that silently falls back to library order; miss the array and a working order is never offered. Nothing fails at compile time either way, and no test pins the two lists against each other — the same class of drift the operator registry removed.
 
 ## Test Coverage Gaps
 
-**The entire refresh pipeline:**
-- What's not tested: Playlist creation, id matching, item removal, and repopulation. This is the code that actually mutates user data.
-- Files: `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs`
-- Risk: High. The dash-stripping id comparison and the direct `LinkedChildren` rewrite are both fragile and both silent on failure.
-- Priority: High. Blocked on making the store injectable (see Tech Debt) and on mocking the Jellyfin manager interfaces.
+**The refresh pipeline (revised 2026-07-29):**
+- What's not tested: playlist creation, id matching, item removal and repopulation — the code that actually mutates user data. `PlaylistSynchronizer` now holds most of it, extracted from the scheduled task since the audit, and has no tests of its own.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/PlaylistSynchronizer.cs`, `Jellyfin.Plugin.SmarterPlaylist/ScheduleTasks/RefreshAllPlaylists.cs`
+- Risk: High, and the highest remaining gap in the repo. The dash-stripping id comparison is silent on failure, and the `"N"`-format requirement for `RemoveItemFromPlaylistAsync` is load-bearing and invisible.
+- Priority: High. **No longer blocked** — the DI work landed and `IPlaylistSynchronizer` is an interface the task consumes, so the task is testable against a fake, and the synchronizer is testable against mocked Jellyfin managers. What is left is the work of writing them.
+- Partial coverage exists either side of it: `RefreshStatusStoreTest` covers status recording, `PlaylistCoverTest` the cover pipeline, and `FilterAndOrderTest` the selection and capping the synchronizer calls into.
 
-**Store layer:**
-- What's not tested: JSON load/save round-trip against a real temp directory. `SmarterPlaylistFileSystem` is now covered by `SmarterPlaylistFileSystemTest`, but `SmarterPlaylistStore` is not.
-- Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistStore.cs`
-- Risk: Medium. DTO-level serialization is covered by `SmarterPlaylistDtoTest.cs`, but nothing exercises the file I/O path.
-- Priority: Medium. Straightforward to add — no Jellyfin services are involved.
-- **Unblocked 2026-07-25:** the test project now references `Jellyfin.Controller`/`Jellyfin.Model` *without* `ExcludeAssets=runtime`. The plugin excludes them because the server supplies them at runtime, but that also made every Jellyfin type fail to load under the test host — which is the real reason the Jellyfin-facing code had no coverage, rather than a deliberate choice. Tests touching Jellyfin types are now possible.
+**Store layer — CLOSED:**
+- What's now tested: `SmarterPlaylistStoreTest` exercises the file I/O path against a real temp directory, including that saved definitions stay readable rather than minified and that `FileName` is taken from disk so a divergent field cannot fork a definition.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylistStore.cs`, `Jellyfin.Plugin.SmarterPlaylist.Tests/SmarterPlaylistStoreTest.cs`
+- **Unblocked 2026-07-25:** the test project references `Jellyfin.Controller`/`Jellyfin.Model` *without* `ExcludeAssets=runtime`. The plugin excludes them because the server supplies them at runtime, but that also made every Jellyfin type fail to load under the test host — which was the real reason the Jellyfin-facing code had no coverage, rather than a deliberate choice.
 
 **`OperandFactory` projection:**
 - What's not tested: The mapping from `BaseItem` to `Operand`, including the `PersonKind` filtering that was silently broken before the 10.11 migration (it compared the enum against strings, so every person collection came back empty).
@@ -233,12 +264,18 @@ Every item below was verified against the code in this repository. Items marked 
 - Files: `Jellyfin.Plugin.SmarterPlaylist/SmarterPlaylist.cs`, `Jellyfin.Plugin.SmarterPlaylist.Tests/FilterAndOrderTest.cs`
 - Resolution: this was never really blocked on mocking. `FilterPlaylistItems` took Jellyfin entities plus the two managers needed to project them, which is what made it unreachable from a test. It now takes flattened `PlaylistCandidate` records, so selection, ordering and capping are all exercised directly with no doubles at all. Ordering was covered by the same change.
 
-**Documented operator matrix:**
-- What's now tested: Every row of the README's operator table is pinned by `EngineTest.cs` — collection `Contains` requiring whole elements, element-wise regex, binary equality on text, and `NotEqual` on booleans.
-- Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Engine.cs`, `README.md`
-- Risk: Low, and deliberately so. If someone changes an `Operand` property's type, the corresponding test fails and points at the README row that also needs updating.
-- Priority: Maintain. Add a test row whenever a README row is added.
+**Documented operator matrix (revised 2026-07-29):**
+- What's now tested: `SchemaBuilderTest` pins each kind's operator list exactly, and `EveryAdvertisedOperatorCompiles` proves the schema cannot advertise anything the engine would reject. That test now samples a value shaped to each operator's arity, so it still covers the multi-value operators rather than passing them a single value they would legitimately refuse. `EveryAdvertisedOperatorIsDescribed` catches an operator offered on a member but missing from `SchemaResponse.Operators`, which would leave the page with no way to choose an input for it.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/QueryEngine/Operators/OperatorRegistry.cs`, `Jellyfin.Plugin.SmarterPlaylist.Tests/SchemaBuilderTest.cs`, `README.md`
+- Risk: Low. The README table and the schema are both derived from one registry, so they can only disagree if the README is edited by hand and not re-checked.
+- Priority: Maintain. The README table is *not* generated, so adding an operator means updating it as well as the registry. Nothing enforces that.
+
+**Config page JavaScript:**
+- What's not tested: `configPage.html` carries roughly 500 lines of logic — control selection by member kind and operator arity, date composition and decomposition, value-picker loading and hinting, DTO read/write — none of which is exercised by anything.
+- Files: `Jellyfin.Plugin.SmarterPlaylist/Configuration/configPage.html`
+- Risk: Medium. The arity branch added on 2026-07-29 decides whether a value box is numeric, free text or disabled, and clears the value when arity changes. A mistake there silently saves a value in the wrong shape, which validation would then reject at the server — recoverable, but confusing.
+- Priority: Low-medium. There is no JS test harness in the repo and adding one for a single embedded page is a disproportionate amount of new infrastructure. The server-side guarantees are the real safety net: anything the page can produce is validated before it is saved.
 
 ---
 
-*Concerns audit: 2026-07-25*
+*Concerns audit: 2026-07-25. Revised 2026-07-29 for the configuration page, HTTP API, validation layer and operator registry.*
