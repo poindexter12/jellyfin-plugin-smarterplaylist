@@ -528,7 +528,9 @@ Check the server version. This build requires Jellyfin 10.11 and will not load o
 - More properties to match on. Please file a feature request if you have ideas — production year,
   official rating, tags, runtime and series name have all landed; what is left is whatever Jellyfin
   exposes that nobody has asked for yet.
-- More sorting methods, such as by name, date added, or rating.
+- More sorting methods, such as by name, date added, or rating. Adding one is a class deriving from
+  `Order` plus one entry in `OrderRegistry` — the engine and the configuration page both read the
+  vocabulary from there.
 - More operators. The reflection-based rule engine has been replaced with an explicit operator
   registry, so an operator is now one class implementing `IRuleOperator` — the engine, the config
   page's schema and validation all pick it up from there. Custom property *types* with their own

@@ -38,13 +38,7 @@ namespace Jellyfin.Plugin.SmarterPlaylist
             ExpressionSets = Engine.NormalizeRuleSets(dto.ExpressionSets);
             MaxItems = dto.MaxItems > 0 ? dto.MaxItems : DefaultMaxItems;
 
-            Order = dto.Order.Name switch
-            {
-                PremiereDateOrder.OrderName => new PremiereDateOrder(),
-                PremiereDateOrderDesc.OrderName => new PremiereDateOrderDesc(),
-                SeriesEpisodeOrder.OrderName => new SeriesEpisodeOrder(),
-                _ => new NoOrder(),
-            };
+            Order = OrderRegistry.Resolve(dto.Order.Name);
 
             ReferencedMembers = ExpressionSets
                 .SelectMany(set => set.Expressions)
