@@ -1,7 +1,7 @@
 ---
 name: "Smarter Playlist"
 guid: "3311dfd2-fe3b-4367-a3f0-0dcea5ba07cd"
-version: "2.12.0"
+version: "2.12.1"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 overview: "Create dynamic playlists from rules"
@@ -19,5 +19,5 @@ artifacts:
   - "logo.png"
 changelog: |-
 
-  ### New features and improvements ###
-  - Replace the reflection rule engine with an operator registry (#41) @poindexter12
+  ### Code or Repo Maintenance ###
+  - Give sort orders the registry operators already have (#43) @poindexter12
